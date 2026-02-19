@@ -323,8 +323,44 @@ def sync(full: bool) -> None:
         console = Console()
         service = SyncService()
 
-        result = service.sync(full=full)
-        console.print(result, highlight=False)
+        mode = "full" if full else "incremental"
+        console.print(
+            f"[bold]Starting {mode} sync...[/bold]", highlight=False
+        )
+
+        def progress(stage: str, current: int, total: int) -> None:
+            if total > 0:
+                pct = current * 100 // total
+                console.print(
+                    f"  [dim]{stage}:[/dim] {pct}%", highlight=False
+                )
+            else:
+                console.print(f"  [dim]{stage}[/dim]", highlight=False)
+
+        result = service.sync(full=full, progress_callback=progress)
+
+        console.print()
+        if result.success:
+            console.print(
+                "[bold green]Sync complete![/bold green]", highlight=False
+            )
+        else:
+            console.print(
+                "[bold red]Sync completed with errors.[/bold red]",
+                highlight=False,
+            )
+        console.print(result.summary(), highlight=False)
+
+        if result.errors:
+            console.print()
+            console.print("[yellow]Errors:[/yellow]")
+            for err in result.errors[:10]:
+                console.print(f"  - {err}", highlight=False)
+            if len(result.errors) > 10:
+                console.print(
+                    f"  ... and {len(result.errors) - 10} more",
+                    highlight=False,
+                )
 
     except Exception as exc:
         click.echo(f"Error during sync: {exc}", err=True)

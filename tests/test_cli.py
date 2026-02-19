@@ -195,10 +195,10 @@ class TestValidateCommand:
 
 class TestSyncCommand:
     def test_sync_runs(self, runner):
-        """sync should execute and show placeholder message."""
+        """sync should execute and show sync status."""
         result = runner.invoke(cli, ["sync"])
         assert result.exit_code == 0
-        assert "not yet implemented" in result.output.lower()
+        assert "sync" in result.output.lower()
 
     def test_sync_full(self, runner):
         """sync --full should execute."""

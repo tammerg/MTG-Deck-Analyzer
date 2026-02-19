@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import os
-import tempfile
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
@@ -32,6 +31,47 @@ def sample_csv(tmp_path):
     return str(csv_file)
 
 
+def _make_card(name="Test Card", card_id=1, color_identity=None, cmc=2.0, type_line="Creature"):
+    """Create a Card object for testing."""
+    from mtg_deck_maker.models.card import Card
+
+    return Card(
+        oracle_id=f"oracle-{card_id}",
+        name=name,
+        type_line=type_line,
+        cmc=cmc,
+        color_identity=color_identity or ["W"],
+        legal_commander=True,
+        id=card_id,
+    )
+
+
+def _make_deck(name="Test Deck"):
+    """Create a Deck object for testing."""
+    from mtg_deck_maker.models.deck import Deck, DeckCard
+
+    return Deck(
+        name=name,
+        cards=[
+            DeckCard(
+                card_id=1, quantity=1, category="commander",
+                card_name="Test Commander", cmc=4.0, price=5.0,
+            ),
+            DeckCard(
+                card_id=2, quantity=1, category="ramp",
+                card_name="Sol Ring", cmc=1.0, price=3.0,
+            ),
+        ],
+    )
+
+
+def _mock_db_path():
+    """Return a MagicMock Path that reports as existing."""
+    path = MagicMock()
+    path.exists.return_value = True
+    return path
+
+
 # === Version and Help ===
 
 
@@ -52,14 +92,9 @@ class TestVersionAndHelp:
     def test_help_lists_commands(self, runner):
         """--help should list all available commands."""
         result = runner.invoke(cli, ["--help"])
-        assert "build" in result.output
-        assert "analyze" in result.output
-        assert "upgrade" in result.output
-        assert "advise" in result.output
-        assert "validate" in result.output
-        assert "sync" in result.output
-        assert "search" in result.output
-        assert "config" in result.output
+        for cmd in ["build", "analyze", "upgrade", "advise",
+                     "validate", "sync", "search", "config"]:
+            assert cmd in result.output
 
 
 # === Command Existence and Help ===
@@ -119,13 +154,62 @@ class TestCommandHelp:
 
 
 class TestBuildCommand:
-    def test_build_runs(self, runner):
+    @patch("mtg_deck_maker.io.csv_export.export_deck_to_csv")
+    @patch("mtg_deck_maker.services.build_service.BuildService")
+    @patch("mtg_deck_maker.db.price_repo.PriceRepository")
+    @patch("mtg_deck_maker.db.card_repo.CardRepository")
+    @patch("mtg_deck_maker.db.database.Database")
+    @patch("mtg_deck_maker.cli._get_db_path")
+    def test_build_runs(
+        self, mock_db_path, mock_db_cls, mock_card_repo_cls,
+        mock_price_repo_cls, mock_build_svc_cls, mock_export, runner,
+    ):
         """build should execute without crashing."""
+        from mtg_deck_maker.services.build_service import BuildResult
+
+        mock_db_path.return_value = _mock_db_path()
+        mock_db_cls.return_value.__exit__ = MagicMock(return_value=False)
+
+        cmd_card = _make_card(
+            "Atraxa, Praetors' Voice", 1, ["W", "U", "B", "G"], 4.0,
+        )
+        pool_card = _make_card("Sol Ring", 2, [], 1.0, "Artifact")
+
+        mock_card_repo_cls.return_value.get_card_by_name.return_value = cmd_card
+        mock_card_repo_cls.return_value.get_cards_by_color_identity.return_value = [pool_card]
+        mock_price_repo_cls.return_value.get_cheapest_price.return_value = 3.0
+        mock_build_svc_cls.return_value.build.return_value = BuildResult(
+            deck=_make_deck("Atraxa Deck"),
+        )
+
         result = runner.invoke(cli, ["build", "Atraxa, Praetors' Voice"])
         assert result.exit_code == 0
 
-    def test_build_with_options(self, runner):
+    @patch("mtg_deck_maker.io.csv_export.export_deck_to_csv")
+    @patch("mtg_deck_maker.services.build_service.BuildService")
+    @patch("mtg_deck_maker.db.price_repo.PriceRepository")
+    @patch("mtg_deck_maker.db.card_repo.CardRepository")
+    @patch("mtg_deck_maker.db.database.Database")
+    @patch("mtg_deck_maker.cli._get_db_path")
+    def test_build_with_options(
+        self, mock_db_path, mock_db_cls, mock_card_repo_cls,
+        mock_price_repo_cls, mock_build_svc_cls, mock_export, runner,
+    ):
         """build should accept all options."""
+        from mtg_deck_maker.services.build_service import BuildResult
+
+        mock_db_path.return_value = _mock_db_path()
+        mock_db_cls.return_value.__exit__ = MagicMock(return_value=False)
+
+        cmd_card = _make_card("Atraxa", 1, ["W", "U", "B", "G"], 4.0)
+
+        mock_card_repo_cls.return_value.get_card_by_name.return_value = cmd_card
+        mock_card_repo_cls.return_value.get_cards_by_color_identity.return_value = []
+        mock_price_repo_cls.return_value.get_cheapest_price.return_value = 2.0
+        mock_build_svc_cls.return_value.build.return_value = BuildResult(
+            deck=_make_deck("Atraxa Deck"),
+        )
+
         result = runner.invoke(cli, [
             "build", "Atraxa",
             "--budget", "200",
@@ -147,13 +231,63 @@ class TestAnalyzeCommand:
 
 
 class TestUpgradeCommand:
-    def test_upgrade_runs(self, runner, sample_csv):
+    @patch("mtg_deck_maker.services.upgrade_service.UpgradeService")
+    @patch("mtg_deck_maker.db.price_repo.PriceRepository")
+    @patch("mtg_deck_maker.db.card_repo.CardRepository")
+    @patch("mtg_deck_maker.db.database.Database")
+    @patch("mtg_deck_maker.cli._get_db_path")
+    def test_upgrade_runs(
+        self, mock_db_path, mock_db_cls, mock_card_repo_cls,
+        mock_price_repo_cls, mock_upgrade_svc_cls, runner, sample_csv,
+    ):
         """upgrade should execute on a valid CSV file."""
+        mock_db_path.return_value = _mock_db_path()
+        mock_db_cls.return_value.__exit__ = MagicMock(return_value=False)
+
+        sol_ring = _make_card("Sol Ring", 1, [], 1.0, "Artifact")
+        swords = _make_card("Swords to Plowshares", 2, ["W"], 1.0, "Instant")
+        counterspell = _make_card("Counterspell", 3, ["U"], 2.0, "Instant")
+
+        mock_card_repo_cls.return_value.get_card_by_name.side_effect = lambda name: {
+            "Sol Ring": sol_ring,
+            "Swords to Plowshares": swords,
+            "Counterspell": counterspell,
+        }.get(name)
+        mock_card_repo_cls.return_value.get_commander_legal_cards.return_value = [
+            sol_ring, swords, counterspell,
+        ]
+        mock_price_repo_cls.return_value.get_cheapest_price.return_value = 2.0
+
+        mock_upgrade_svc_cls.return_value.recommend_from_cards.return_value = (
+            MagicMock(), [],
+        )
+
         result = runner.invoke(cli, ["upgrade", sample_csv])
         assert result.exit_code == 0
 
-    def test_upgrade_with_options(self, runner, sample_csv):
+    @patch("mtg_deck_maker.services.upgrade_service.UpgradeService")
+    @patch("mtg_deck_maker.db.price_repo.PriceRepository")
+    @patch("mtg_deck_maker.db.card_repo.CardRepository")
+    @patch("mtg_deck_maker.db.database.Database")
+    @patch("mtg_deck_maker.cli._get_db_path")
+    def test_upgrade_with_options(
+        self, mock_db_path, mock_db_cls, mock_card_repo_cls,
+        mock_price_repo_cls, mock_upgrade_svc_cls, runner, sample_csv,
+    ):
         """upgrade should accept budget and focus options."""
+        mock_db_path.return_value = _mock_db_path()
+        mock_db_cls.return_value.__exit__ = MagicMock(return_value=False)
+
+        sol_ring = _make_card("Sol Ring", 1, [], 1.0, "Artifact")
+
+        mock_card_repo_cls.return_value.get_card_by_name.return_value = sol_ring
+        mock_card_repo_cls.return_value.get_commander_legal_cards.return_value = [sol_ring]
+        mock_price_repo_cls.return_value.get_cheapest_price.return_value = 3.0
+
+        mock_upgrade_svc_cls.return_value.recommend_from_cards.return_value = (
+            MagicMock(), [],
+        )
+
         result = runner.invoke(cli, [
             "upgrade", sample_csv,
             "--budget", "25",
@@ -165,7 +299,6 @@ class TestUpgradeCommand:
 class TestAdviseCommand:
     def test_advise_runs(self, runner, sample_csv):
         """advise should execute and fall back gracefully without API key."""
-        # Ensure no API key is set
         env = dict(os.environ)
         env.pop("ANTHROPIC_API_KEY", None)
         result = runner.invoke(
@@ -222,13 +355,42 @@ class TestSyncCommand:
 
 
 class TestSearchCommand:
-    def test_search_runs(self, runner):
+    @patch("mtg_deck_maker.db.price_repo.PriceRepository")
+    @patch("mtg_deck_maker.db.card_repo.CardRepository")
+    @patch("mtg_deck_maker.db.database.Database")
+    @patch("mtg_deck_maker.cli._get_db_path")
+    def test_search_runs(
+        self, mock_db_path, mock_db_cls, mock_card_repo_cls,
+        mock_price_repo_cls, runner,
+    ):
         """search should execute with a query."""
+        mock_db_path.return_value = _mock_db_path()
+        mock_db_cls.return_value.__exit__ = MagicMock(return_value=False)
+
+        sol_ring = _make_card("Sol Ring", 1, [], 1.0, "Artifact")
+        mock_card_repo_cls.return_value.search_cards.return_value = [sol_ring]
+        mock_price_repo_cls.return_value.get_cheapest_price.return_value = 3.0
+
         result = runner.invoke(cli, ["search", "Sol Ring"])
         assert result.exit_code == 0
+        assert "Sol Ring" in result.output
 
-    def test_search_with_filters(self, runner):
+    @patch("mtg_deck_maker.db.price_repo.PriceRepository")
+    @patch("mtg_deck_maker.db.card_repo.CardRepository")
+    @patch("mtg_deck_maker.db.database.Database")
+    @patch("mtg_deck_maker.cli._get_db_path")
+    def test_search_with_filters(
+        self, mock_db_path, mock_db_cls, mock_card_repo_cls,
+        mock_price_repo_cls, runner,
+    ):
         """search should accept filter options."""
+        mock_db_path.return_value = _mock_db_path()
+        mock_db_cls.return_value.__exit__ = MagicMock(return_value=False)
+
+        bolt = _make_card("Lightning Bolt", 1, ["R"], 1.0, "Instant")
+        mock_card_repo_cls.return_value.search_cards.return_value = [bolt]
+        mock_price_repo_cls.return_value.get_cheapest_price.return_value = 1.0
+
         result = runner.invoke(cli, [
             "search", "Lightning",
             "--color", "R",

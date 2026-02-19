@@ -4,10 +4,19 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 
 import click
 
 from mtg_deck_maker import __version__
+
+
+def _get_db_path() -> Path:
+    """Resolve the database path from config defaults."""
+    from mtg_deck_maker.config import load_config
+
+    config = load_config()
+    return Path(config.general.data_dir) / "mtg_deck_maker.db"
 
 
 @click.group()
@@ -39,8 +48,21 @@ def build(
     """
     try:
         from rich.console import Console
+        from rich.table import Table
+
+        from mtg_deck_maker.config import AppConfig, load_config
+        from mtg_deck_maker.db.card_repo import CardRepository
+        from mtg_deck_maker.db.database import Database
+        from mtg_deck_maker.db.price_repo import PriceRepository
+        from mtg_deck_maker.io.csv_export import export_deck_to_csv
+        from mtg_deck_maker.models.commander import Commander
+        from mtg_deck_maker.services.build_service import BuildService, BuildServiceError
 
         console = Console()
+        config = load_config(
+            config_path=Path(config_file) if config_file else None,
+        )
+
         console.print(
             f"[bold]Building deck for:[/bold] {commander}", highlight=False
         )
@@ -52,21 +74,154 @@ def build(
         console.print(f"[dim]Seed:[/dim] {seed}")
         console.print()
 
-        # The build command requires a card database and card pool.
-        # Until the full Scryfall sync is implemented, provide guidance.
+        db_path = _get_db_path()
+        if not db_path.exists():
+            console.print(
+                "[red]Error:[/red] No card database found. "
+                "Run 'mtg-deck sync --full' first.",
+                highlight=False,
+            )
+            sys.exit(1)
+
+        with Database(db_path) as db:
+            card_repo = CardRepository(db)
+            price_repo = PriceRepository(db)
+
+            # Look up commander card
+            console.print("[dim]Looking up commander...[/dim]", highlight=False)
+            cmd_card = card_repo.get_card_by_name(commander)
+            if cmd_card is None:
+                # Try fuzzy search
+                results = card_repo.search_cards(commander)
+                if results:
+                    names = [c.name for c in results[:5]]
+                    console.print(
+                        f"[red]Commander '{commander}' not found.[/red]",
+                        highlight=False,
+                    )
+                    console.print("Did you mean:", highlight=False)
+                    for n in names:
+                        console.print(f"  - {n}", highlight=False)
+                else:
+                    console.print(
+                        f"[red]Commander '{commander}' not found in database.[/red]",
+                        highlight=False,
+                    )
+                sys.exit(1)
+
+            # Look up partner if specified
+            partner_card = None
+            if partner:
+                partner_card = card_repo.get_card_by_name(partner)
+                if partner_card is None:
+                    console.print(
+                        f"[red]Partner '{partner}' not found in database.[/red]",
+                        highlight=False,
+                    )
+                    sys.exit(1)
+
+            # Build Commander model
+            cmd = Commander(
+                primary=cmd_card,
+                partner=partner_card,
+            )
+
+            # Get card pool within color identity
+            color_identity = cmd.combined_color_identity()
+            console.print(
+                f"[dim]Loading card pool for {'/'.join(color_identity) or 'colorless'}...[/dim]",
+                highlight=False,
+            )
+            card_pool = card_repo.get_cards_by_color_identity(color_identity)
+            console.print(
+                f"[dim]Found {len(card_pool)} candidates[/dim]",
+                highlight=False,
+            )
+
+            # Get prices from DB (cheapest per card)
+            console.print("[dim]Loading prices...[/dim]", highlight=False)
+            prices: dict[int, float] = {}
+            for card in card_pool:
+                if card.id is not None:
+                    price = price_repo.get_cheapest_price(card.id)
+                    if price is not None:
+                        prices[card.id] = price
+            # Also price the commander
+            if cmd_card.id is not None:
+                cmd_price = price_repo.get_cheapest_price(cmd_card.id)
+                if cmd_price is not None:
+                    prices[cmd_card.id] = cmd_price
+
+            # Build deck
+            console.print("[dim]Building deck...[/dim]", highlight=False)
+            service = BuildService(config=config)
+            try:
+                result = service.build(
+                    commander=cmd,
+                    budget=budget,
+                    card_pool=card_pool,
+                    prices=prices,
+                    seed=seed,
+                    export_csv=output is not None,
+                    csv_filepath=output,
+                )
+            except BuildServiceError as exc:
+                console.print(f"[red]Build failed:[/red] {exc}", highlight=False)
+                sys.exit(1)
+
+        console.print()
+        deck = result.deck
+
+        # Display deck summary
         console.print(
-            "[yellow]Note:[/yellow] The build command requires a synced "
-            "card database. Run 'mtg-deck sync --full' first to download "
-            "card data.",
+            f"[bold green]{deck.name}[/bold green]", highlight=False
+        )
+        console.print(
+            f"Total cards: {deck.total_cards()} | "
+            f"Total price: ${deck.total_price():.2f} | "
+            f"Avg CMC: {deck.average_cmc():.2f}",
             highlight=False,
         )
-    except ImportError:
-        click.echo(f"Building deck for: {commander}")
-        click.echo(f"Budget: ${budget:.2f}")
-        click.echo(
-            "Note: The build command requires a synced card database. "
-            "Run 'mtg-deck sync --full' first."
-        )
+        console.print()
+
+        # Category breakdown table
+        cat_counts: dict[str, int] = {}
+        for dc in deck.cards:
+            cat = dc.category or "other"
+            cat_counts[cat] = cat_counts.get(cat, 0) + dc.quantity
+
+        table = Table(title="Deck Composition")
+        table.add_column("Category", style="cyan")
+        table.add_column("Count", justify="right", style="green")
+        for cat, count in sorted(
+            cat_counts.items(), key=lambda x: x[1], reverse=True
+        ):
+            table.add_row(cat, str(count))
+        console.print(table)
+
+        # Warnings
+        if result.warnings:
+            console.print()
+            for w in result.warnings:
+                console.print(f"[yellow]Warning:[/yellow] {w}", highlight=False)
+
+        # CSV output
+        if output:
+            console.print(f"\nDeck exported to: [bold]{output}[/bold]", highlight=False)
+        else:
+            # Auto-export to default path
+            default_out = f"{commander.replace(' ', '_').lower()}_deck.csv"
+            export_deck_to_csv(deck=deck, filepath=default_out)
+            console.print(
+                f"\nDeck exported to: [bold]{default_out}[/bold]",
+                highlight=False,
+            )
+
+    except SystemExit:
+        raise
+    except Exception as exc:
+        click.echo(f"Error building deck: {exc}", err=True)
+        sys.exit(1)
 
 
 @cli.command()
@@ -166,8 +321,16 @@ def upgrade(deck_file: str, budget: float, focus: str | None) -> None:
     """
     try:
         from rich.console import Console
+        from rich.table import Table
+
+        from mtg_deck_maker.db.card_repo import CardRepository
+        from mtg_deck_maker.db.database import Database
+        from mtg_deck_maker.db.price_repo import PriceRepository
+        from mtg_deck_maker.io.csv_import import import_deck_from_csv
+        from mtg_deck_maker.services.upgrade_service import UpgradeService
 
         console = Console()
+
         console.print(
             f"[bold]Upgrade recommendations for:[/bold] {deck_file}",
             highlight=False,
@@ -177,19 +340,102 @@ def upgrade(deck_file: str, budget: float, focus: str | None) -> None:
             console.print(f"[dim]Focus:[/dim] {focus}")
         console.print()
 
-        # Upgrade recommendations require a card pool database.
+        db_path = _get_db_path()
+        if not db_path.exists():
+            console.print(
+                "[red]Error:[/red] No card database found. "
+                "Run 'mtg-deck sync --full' first.",
+                highlight=False,
+            )
+            sys.exit(1)
+
+        # Import deck
+        import_result = import_deck_from_csv(deck_file)
+        if import_result.errors:
+            for err in import_result.errors:
+                console.print(f"[red]Import error:[/red] {err}", highlight=False)
+            sys.exit(1)
+
+        with Database(db_path) as db:
+            card_repo = CardRepository(db)
+            price_repo = PriceRepository(db)
+
+            # Resolve imported card names to Card objects
+            deck_cards = []
+            name_prices: dict[str, float] = {}
+            for ic in import_result.cards:
+                card = card_repo.get_card_by_name(ic.name)
+                if card is not None:
+                    deck_cards.append(card)
+                    if card.id is not None:
+                        price = price_repo.get_cheapest_price(card.id)
+                        if price is not None:
+                            name_prices[card.name] = price
+
+            if not deck_cards:
+                console.print(
+                    "[red]Could not resolve any cards from the deck file.[/red]",
+                    highlight=False,
+                )
+                sys.exit(1)
+
+            # Get replacement card pool
+            console.print("[dim]Loading card pool...[/dim]", highlight=False)
+            card_pool = card_repo.get_commander_legal_cards()
+
+            # Get prices for pool
+            for card in card_pool:
+                if card.id is not None and card.name not in name_prices:
+                    price = price_repo.get_cheapest_price(card.id)
+                    if price is not None:
+                        name_prices[card.name] = price
+
+        # Run upgrade service
+        service = UpgradeService()
+        analysis, recommendations = service.recommend_from_cards(
+            deck_cards=deck_cards,
+            card_pool=card_pool,
+            prices=name_prices,
+            budget=budget,
+            focus=focus,
+        )
+
+        if not recommendations:
+            console.print(
+                "[green]No upgrades recommended - deck looks solid![/green]",
+                highlight=False,
+            )
+            return
+
+        # Display recommendations
+        table = Table(title=f"Top Upgrades (${budget:.2f} budget)")
+        table.add_column("Out", style="red")
+        table.add_column("In", style="green")
+        table.add_column("Cost", justify="right", style="yellow")
+        table.add_column("Reason")
+
+        total_cost = 0.0
+        for rec in recommendations:
+            cost = max(rec.price_delta, 0)
+            total_cost += cost
+            table.add_row(
+                rec.card_out,
+                rec.card_in,
+                f"${cost:.2f}",
+                rec.reason,
+            )
+
+        console.print(table)
         console.print(
-            "[yellow]Note:[/yellow] Upgrade recommendations require a "
-            "synced card database for the replacement card pool. "
-            "Run 'mtg-deck sync --full' first.",
+            f"\n[bold]Total upgrade cost:[/bold] ${total_cost:.2f}",
             highlight=False,
         )
-    except ImportError:
-        click.echo(f"Upgrade recommendations for: {deck_file}")
-        click.echo(f"Budget: ${budget:.2f}")
-        click.echo(
-            "Note: Upgrade recommendations require a synced card database."
-        )
+
+    except SystemExit:
+        raise
+    except Exception as exc:
+        click.echo(f"Error getting upgrades: {exc}", err=True)
+        sys.exit(1)
 
 
 @cli.command()
@@ -369,34 +615,94 @@ def sync(full: bool) -> None:
 
 @cli.command()
 @click.argument("query")
-@click.option("--color", "-c", type=str, help="Filter by color identity.")
+@click.option("--color", "-c", type=str, help="Filter by color identity (e.g. WUB).")
 @click.option("--type", "card_type", type=str, help="Filter by card type.")
-def search(query: str, color: str | None, card_type: str | None) -> None:
+@click.option("--limit", "-n", type=int, default=20, help="Max results to show.")
+def search(query: str, color: str | None, card_type: str | None, limit: int) -> None:
     """Search the local card database.
 
-    QUERY is the search term for card names or oracle text.
+    QUERY is the search term for card names.
     """
     try:
         from rich.console import Console
+        from rich.table import Table
+
+        from mtg_deck_maker.db.card_repo import CardRepository
+        from mtg_deck_maker.db.database import Database
+        from mtg_deck_maker.db.price_repo import PriceRepository
 
         console = Console()
-        console.print(
-            f"[bold]Searching for:[/bold] {query}", highlight=False
-        )
-        if color:
-            console.print(f"[dim]Color filter:[/dim] {color}")
-        if card_type:
-            console.print(f"[dim]Type filter:[/dim] {card_type}")
-        console.print()
 
-        console.print(
-            "[yellow]Note:[/yellow] Card search requires a synced local "
-            "database. Run 'mtg-deck sync --full' first.",
-            highlight=False,
-        )
-    except ImportError:
-        click.echo(f"Searching for: {query}")
-        click.echo("Note: Card search requires a synced local database.")
+        db_path = _get_db_path()
+        if not db_path.exists():
+            console.print(
+                "[red]Error:[/red] No card database found. "
+                "Run 'mtg-deck sync --full' first.",
+                highlight=False,
+            )
+            sys.exit(1)
+
+        with Database(db_path) as db:
+            card_repo = CardRepository(db)
+            price_repo = PriceRepository(db)
+
+            results = card_repo.search_cards(query)
+
+            # Apply filters
+            if color:
+                color_set = set(color.upper())
+                results = [
+                    c for c in results
+                    if set(c.color_identity).issubset(color_set)
+                ]
+
+            if card_type:
+                results = [
+                    c for c in results
+                    if card_type.lower() in c.type_line.lower()
+                ]
+
+            if not results:
+                console.print(
+                    f"No cards found matching '{query}'.", highlight=False
+                )
+                return
+
+            total = len(results)
+            results = results[:limit]
+
+            table = Table(
+                title=f"Search Results ({total} total, showing {len(results)})"
+            )
+            table.add_column("Name", style="bold")
+            table.add_column("Type", style="dim")
+            table.add_column("CMC", justify="right")
+            table.add_column("Colors")
+            table.add_column("Price", justify="right", style="green")
+
+            for card in results:
+                price_str = "N/A"
+                if card.id is not None:
+                    price = price_repo.get_cheapest_price(card.id)
+                    if price is not None:
+                        price_str = f"${price:.2f}"
+
+                colors = "/".join(card.color_identity) if card.color_identity else "C"
+                table.add_row(
+                    card.name,
+                    card.type_line,
+                    str(int(card.cmc)) if card.cmc == int(card.cmc) else str(card.cmc),
+                    colors,
+                    price_str,
+                )
+
+            console.print(table)
+
+    except SystemExit:
+        raise
+    except Exception as exc:
+        click.echo(f"Error searching: {exc}", err=True)
+        sys.exit(1)
 
 
 @cli.command("config")

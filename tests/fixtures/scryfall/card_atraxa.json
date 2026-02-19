@@ -1,0 +1,38 @@
+{
+  "object": "card",
+  "id": "d0d33d52-3d28-4635-b985-51e126f33e96",
+  "oracle_id": "aaaa-bbbb-cccc-dddd",
+  "name": "Atraxa, Praetors' Voice",
+  "lang": "en",
+  "released_at": "2016-11-11",
+  "layout": "normal",
+  "mana_cost": "{G}{W}{U}{B}",
+  "cmc": 4.0,
+  "type_line": "Legendary Creature - Phyrexian Angel Horror",
+  "oracle_text": "Flying, vigilance, deathtouch, lifelink\nAt the beginning of your end step, proliferate.",
+  "colors": ["W", "U", "B", "G"],
+  "color_identity": ["W", "U", "B", "G"],
+  "keywords": ["Flying", "Vigilance", "Deathtouch", "Lifelink"],
+  "legalities": {
+    "commander": "legal",
+    "brawl": "not_legal"
+  },
+  "set": "C16",
+  "set_name": "Commander 2016",
+  "collector_number": "28",
+  "rarity": "mythic",
+  "finishes": ["nonfoil"],
+  "promo": false,
+  "reprint": false,
+  "edhrec_rank": 5,
+  "tcgplayer_id": 789012,
+  "cardmarket_id": 210987,
+  "prices": {
+    "usd": "15.00",
+    "usd_foil": null,
+    "usd_etched": null,
+    "eur": "12.50",
+    "eur_foil": null
+  },
+  "updated_at": "2026-01-15T00:00:00Z"
+}

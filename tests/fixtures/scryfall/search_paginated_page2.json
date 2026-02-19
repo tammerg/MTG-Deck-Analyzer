@@ -1,0 +1,31 @@
+{
+  "object": "list",
+  "total_cards": 3,
+  "has_more": false,
+  "data": [
+    {
+      "object": "card",
+      "id": "ccc-333",
+      "oracle_id": "oracle-ccc",
+      "name": "Artifact Gamma",
+      "lang": "en",
+      "released_at": "2024-01-01",
+      "mana_cost": "{3}",
+      "cmc": 3.0,
+      "type_line": "Artifact",
+      "oracle_text": "Does thing C.",
+      "colors": [],
+      "color_identity": [],
+      "keywords": [],
+      "legalities": {"commander": "legal", "brawl": "not_legal"},
+      "set": "TST",
+      "collector_number": "3",
+      "rarity": "rare",
+      "finishes": ["nonfoil"],
+      "promo": false,
+      "reprint": true,
+      "prices": {"usd": "2.00", "usd_foil": null, "eur": "1.75", "eur_foil": null},
+      "updated_at": "2026-01-01T00:00:00Z"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "status": "success",
+  "results": [
+    {
+      "name": "Sol Ring",
+      "set": "Commander 2021",
+      "set_code": "C21",
+      "prices": {
+        "usd": "1.49",
+        "usd_foil": null,
+        "eur": "1.15",
+        "eur_foil": null
+      }
+    }
+  ]
+}

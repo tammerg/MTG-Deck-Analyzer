@@ -1,0 +1,9 @@
+{
+  "status": "success",
+  "prices": {
+    "usd": "1.55",
+    "usd_foil": null,
+    "eur": "1.25",
+    "eur_foil": null
+  }
+}

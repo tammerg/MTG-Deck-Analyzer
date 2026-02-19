@@ -1,0 +1,43 @@
+"""Advise service wrapping the LLM advisor for deck consultation.
+
+Provides a high-level interface for getting AI-powered deck advice
+combining deck analysis context with user questions.
+"""
+
+from __future__ import annotations
+
+from mtg_deck_maker.advisor.analyzer import DeckAnalysis
+from mtg_deck_maker.advisor.llm_advisor import get_deck_advice
+
+
+class AdviseService:
+    """Wraps the LLM advisor with service-level orchestration."""
+
+    def __init__(self, api_key: str | None = None) -> None:
+        """Initialize the advise service.
+
+        Args:
+            api_key: Optional Anthropic API key. If None, the advisor
+                will check the ANTHROPIC_API_KEY environment variable.
+        """
+        self._api_key = api_key
+
+    def get_advice(
+        self,
+        deck_analysis: DeckAnalysis,
+        question: str,
+    ) -> str:
+        """Get AI-powered advice for a deck.
+
+        Args:
+            deck_analysis: Analyzed deck data.
+            question: The user's question or problem description.
+
+        Returns:
+            Text response with deck advice.
+        """
+        return get_deck_advice(
+            deck_analysis=deck_analysis,
+            question=question,
+            api_key=self._api_key,
+        )

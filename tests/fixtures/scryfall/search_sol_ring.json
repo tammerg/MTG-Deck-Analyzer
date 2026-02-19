@@ -1,0 +1,45 @@
+{
+  "object": "list",
+  "total_cards": 1,
+  "has_more": false,
+  "data": [
+    {
+      "object": "card",
+      "id": "f1d1e196-1a14-4e18-9136-e34c71f55836",
+      "oracle_id": "9b4cf4ef-0ea4-43f4-b529-9c5de5c3b22c",
+      "name": "Sol Ring",
+      "lang": "en",
+      "released_at": "2021-04-16",
+      "layout": "normal",
+      "mana_cost": "{1}",
+      "cmc": 1.0,
+      "type_line": "Artifact",
+      "oracle_text": "{T}: Add {C}{C}.",
+      "colors": [],
+      "color_identity": [],
+      "keywords": [],
+      "legalities": {
+        "commander": "legal",
+        "brawl": "not_legal"
+      },
+      "set": "C21",
+      "set_name": "Commander 2021",
+      "collector_number": "263",
+      "rarity": "uncommon",
+      "finishes": ["nonfoil"],
+      "promo": false,
+      "reprint": true,
+      "edhrec_rank": 1,
+      "tcgplayer_id": 123456,
+      "cardmarket_id": 654321,
+      "prices": {
+        "usd": "1.50",
+        "usd_foil": null,
+        "usd_etched": null,
+        "eur": "1.20",
+        "eur_foil": null
+      },
+      "updated_at": "2026-01-15T00:00:00Z"
+    }
+  ]
+}

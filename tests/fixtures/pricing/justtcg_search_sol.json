@@ -1,0 +1,19 @@
+{
+  "status": "success",
+  "results": [
+    {
+      "name": "Sol Ring",
+      "set_code": "C21",
+      "prices": {
+        "usd": "1.55"
+      }
+    },
+    {
+      "name": "Sol Talisman",
+      "set_code": "MH2",
+      "prices": {
+        "usd": "0.50"
+      }
+    }
+  ]
+}

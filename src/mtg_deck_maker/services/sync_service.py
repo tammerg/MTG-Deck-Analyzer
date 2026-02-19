@@ -181,23 +181,29 @@ def _process_cards(
                 printing_db_id = cursor.lastrowid
                 result.printings_added += 1
 
-            # Insert prices
-            for price_info in _extract_prices(raw_card):
+            # Upsert prices - delete stale then insert fresh
+            price_records = _extract_prices(raw_card)
+            if price_records:
                 db.execute(
-                    """INSERT INTO prices (
-                        printing_id, source, currency, price, finish,
-                        retrieved_at
-                    ) VALUES (?, ?, ?, ?, ?, ?)""",
-                    (
-                        printing_db_id,
-                        price_info["source"],
-                        price_info["currency"],
-                        price_info["price"],
-                        price_info["finish"],
-                        now,
-                    ),
+                    "DELETE FROM prices WHERE printing_id = ? AND source = 'scryfall'",
+                    (printing_db_id,),
                 )
-                result.prices_added += 1
+                for price_info in price_records:
+                    db.execute(
+                        """INSERT INTO prices (
+                            printing_id, source, currency, price, finish,
+                            retrieved_at
+                        ) VALUES (?, ?, ?, ?, ?, ?)""",
+                        (
+                            printing_db_id,
+                            price_info["source"],
+                            price_info["currency"],
+                            price_info["price"],
+                            price_info["finish"],
+                            now,
+                        ),
+                    )
+                    result.prices_added += 1
 
         except Exception as exc:
             card_name = raw_card.get("name", "unknown")

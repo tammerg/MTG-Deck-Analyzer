@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+from unittest.mock import patch
 
 import pytest
 from click.testing import CliRunner
@@ -194,16 +195,30 @@ class TestValidateCommand:
 
 
 class TestSyncCommand:
-    def test_sync_runs(self, runner):
+    @patch("mtg_deck_maker.services.sync_service.SyncService")
+    def test_sync_runs(self, mock_svc_cls, runner):
         """sync should execute and show sync status."""
+        from mtg_deck_maker.services.sync_service import SyncResult
+
+        mock_svc_cls.return_value.sync.return_value = SyncResult(
+            errors=["No cards in database. Run full sync first: mtg-deck sync --full"]
+        )
         result = runner.invoke(cli, ["sync"])
         assert result.exit_code == 0
         assert "sync" in result.output.lower()
 
-    def test_sync_full(self, runner):
+    @patch("mtg_deck_maker.services.sync_service.SyncService")
+    def test_sync_full(self, mock_svc_cls, runner):
         """sync --full should execute."""
+        from mtg_deck_maker.services.sync_service import SyncResult
+
+        mock_svc_cls.return_value.sync.return_value = SyncResult(
+            cards_added=100, printings_added=100, prices_added=300,
+            duration_seconds=5.0,
+        )
         result = runner.invoke(cli, ["sync", "--full"])
         assert result.exit_code == 0
+        assert "complete" in result.output.lower()
 
 
 class TestSearchCommand:

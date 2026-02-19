@@ -377,6 +377,21 @@ class TestProcessCards:
             cursor = db.execute("SELECT COUNT(*) as cnt FROM cards")
             assert cursor.fetchone()["cnt"] == 1
 
+    def test_prices_replaced_on_resync(self):
+        """Re-syncing should replace old prices, not duplicate them."""
+        with Database(":memory:") as db:
+            result1 = SyncResult()
+            _process_cards([SAMPLE_CARD_SOL_RING], db, result1, None)
+            first_price_count = result1.prices_added
+
+            result2 = SyncResult()
+            _process_cards([SAMPLE_CARD_SOL_RING], db, result2, None)
+
+            # Price count in DB should not grow
+            cursor = db.execute("SELECT COUNT(*) as cnt FROM prices")
+            total_prices = cursor.fetchone()["cnt"]
+            assert total_prices == first_price_count
+
     def test_mixed_legal_and_illegal_cards(self):
         with Database(":memory:") as db:
             result = SyncResult()

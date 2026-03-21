@@ -118,6 +118,48 @@ class PriceRepository:
             return None
         return float(row["min_price"])
 
+    def get_cheapest_prices(
+        self,
+        card_ids: list[int],
+        currency: str = "USD",
+        finish: str = "nonfoil",
+    ) -> dict[int, float]:
+        """Get cheapest prices for multiple cards in a single query.
+
+        Joins prices with printings to find the lowest price for any
+        printing of each given card. Uses chunked queries to stay within
+        SQLite's variable limit.
+
+        Args:
+            card_ids: List of card database IDs.
+            currency: Currency to filter by.
+            finish: Finish to filter by.
+
+        Returns:
+            Dict mapping card_id to cheapest price. Cards without prices
+            are omitted.
+        """
+        if not card_ids:
+            return {}
+        result: dict[int, float] = {}
+        chunk_size = 900  # SQLite variable limit safety margin
+        for i in range(0, len(card_ids), chunk_size):
+            chunk = card_ids[i : i + chunk_size]
+            placeholders = ",".join("?" for _ in chunk)
+            cursor = self._db.execute(
+                f"""SELECT pr.card_id, MIN(p.price) as min_price
+                FROM prices p
+                JOIN printings pr ON p.printing_id = pr.id
+                WHERE pr.card_id IN ({placeholders})
+                  AND p.currency = ? AND p.finish = ? AND p.price IS NOT NULL
+                GROUP BY pr.card_id""",
+                (*chunk, currency, finish),
+            )
+            for row in cursor.fetchall():
+                if row["min_price"] is not None:
+                    result[row["card_id"]] = float(row["min_price"])
+        return result
+
     def bulk_insert_prices(
         self,
         prices: list[dict],

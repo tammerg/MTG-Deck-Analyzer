@@ -202,6 +202,62 @@ class TestColorIdentityFilter:
         assert len(results) == 5  # All cards fit in WUBRG
 
 
+    def test_color_identity_excludes_outside_colors(
+        self, card_repo: CardRepository
+    ) -> None:
+        """Cards with colors outside the identity should be excluded."""
+        card_repo.insert_card(Card(
+            oracle_id="wu-card",
+            name="WU Card",
+            type_line="Creature",
+            color_identity=["W", "U"],
+            legal_commander=True,
+        ))
+        card_repo.insert_card(Card(
+            oracle_id="r-card",
+            name="Red Card",
+            type_line="Creature",
+            color_identity=["R"],
+            legal_commander=True,
+        ))
+        results = card_repo.get_cards_by_color_identity(["W", "U"])
+        names = [c.name for c in results]
+        assert "WU Card" in names
+        assert "Red Card" not in names
+
+    def test_five_color_returns_all(
+        self, card_repo: CardRepository, sample_cards_for_db: list[Card]
+    ) -> None:
+        """Five-color identity should return all commander-legal cards."""
+        card_repo.bulk_insert_cards(sample_cards_for_db)
+        results = card_repo.get_cards_by_color_identity(["W", "U", "B", "R", "G"])
+        assert len(results) == 5
+
+    def test_colorless_cards_always_included(
+        self, card_repo: CardRepository
+    ) -> None:
+        """Colorless cards should be returned for any non-empty identity."""
+        card_repo.insert_card(Card(
+            oracle_id="colorless-rock",
+            name="Mana Rock",
+            type_line="Artifact",
+            color_identity=[],
+            legal_commander=True,
+        ))
+        card_repo.insert_card(Card(
+            oracle_id="green-creature",
+            name="Green Elf",
+            type_line="Creature",
+            color_identity=["G"],
+            legal_commander=True,
+        ))
+        # Ask for mono-red: should include colorless but not green
+        results = card_repo.get_cards_by_color_identity(["R"])
+        names = [c.name for c in results]
+        assert "Mana Rock" in names
+        assert "Green Elf" not in names
+
+
 class TestBulkInsert:
     """Test bulk card insertion."""
 

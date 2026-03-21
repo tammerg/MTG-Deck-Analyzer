@@ -269,6 +269,104 @@ class TestGetCheapestPrice:
         assert cheapest is None
 
 
+class TestGetCheapestPrices:
+    """Test batch price loading for multiple cards."""
+
+    def test_bulk_cheapest_prices(
+        self,
+        all_repos: tuple[CardRepository, PrintingRepository, PriceRepository],
+        printing_ids: tuple[int, int],
+    ) -> None:
+        card_repo, printing_repo, price_repo = all_repos
+        pid1, pid2 = printing_ids
+
+        # Card 1 already exists from printing_ids fixture
+        # Insert a second card with its own printing
+        card2 = Card(
+            oracle_id="bulk-price-card-2",
+            name="Bulk Price Card 2",
+            type_line="Instant",
+            mana_cost="{U}",
+            cmc=1.0,
+            legal_commander=True,
+        )
+        card2_id = card_repo.insert_card(card2)
+        p3 = Printing(
+            scryfall_id="bulk-price-print-3",
+            card_id=card2_id,
+            set_code="SET3",
+            collector_number="1",
+        )
+        pid3 = printing_repo.insert_printing(p3)
+
+        # Insert prices for both cards
+        price_repo.insert_price(printing_id=pid1, source="tcgplayer", price=5.00)
+        price_repo.insert_price(printing_id=pid2, source="tcgplayer", price=3.00)
+        price_repo.insert_price(printing_id=pid3, source="tcgplayer", price=2.50)
+
+        card1 = card_repo.get_card_by_name("Price Test Card")
+        assert card1 is not None
+
+        prices = price_repo.get_cheapest_prices([card1.id, card2_id])
+        assert prices[card1.id] == 3.00  # min of 5.00 and 3.00
+        assert prices[card2_id] == 2.50
+
+    def test_bulk_cheapest_empty_list(
+        self,
+        all_repos: tuple[CardRepository, PrintingRepository, PriceRepository],
+    ) -> None:
+        _, _, price_repo = all_repos
+        prices = price_repo.get_cheapest_prices([])
+        assert prices == {}
+
+    def test_bulk_cheapest_no_prices(
+        self,
+        all_repos: tuple[CardRepository, PrintingRepository, PriceRepository],
+        printing_ids: tuple[int, int],
+    ) -> None:
+        card_repo, _, price_repo = all_repos
+        # Card exists but has no prices inserted
+        card = card_repo.get_card_by_name("Price Test Card")
+        assert card is not None
+        prices = price_repo.get_cheapest_prices([card.id])
+        assert prices == {}
+
+    def test_bulk_cheapest_large_batch(
+        self,
+        all_repos: tuple[CardRepository, PrintingRepository, PriceRepository],
+    ) -> None:
+        card_repo, printing_repo, price_repo = all_repos
+        # Create >900 cards to test chunking
+        card_ids = []
+        for i in range(950):
+            card = Card(
+                oracle_id=f"chunk-test-{i}",
+                name=f"Chunk Card {i}",
+                type_line="Creature",
+                mana_cost="{1}",
+                cmc=1.0,
+                legal_commander=True,
+            )
+            cid = card_repo.insert_card(card)
+            card_ids.append(cid)
+
+            p = Printing(
+                scryfall_id=f"chunk-print-{i}",
+                card_id=cid,
+                set_code="CHK",
+                collector_number=str(i),
+            )
+            pid = printing_repo.insert_printing(p)
+            price_repo.insert_price(printing_id=pid, source="scryfall", price=float(i % 10))
+
+        prices = price_repo.get_cheapest_prices(card_ids)
+        assert len(prices) == 950
+        # Cards with price=0.0 are excluded (price IS NOT NULL, but 0.0 is not null)
+        # Actually 0.0 is not None so they should be included
+        for cid in card_ids:
+            assert cid in prices
+
+
 class TestBulkInsertPrices:
     """Test bulk price insertion."""
 

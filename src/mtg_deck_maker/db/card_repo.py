@@ -120,7 +120,8 @@ class CardRepository:
         """Return cards whose color identity is a subset of the given colors.
 
         For a card to be within identity, every color in its color_identity
-        must be present in the provided colors list.
+        must be present in the provided colors list.  Uses SQL-level filtering
+        to avoid loading the entire card table into Python.
 
         Args:
             colors: List of color characters (e.g., ["W", "U", "B"]).
@@ -128,32 +129,45 @@ class CardRepository:
         Returns:
             List of Card instances within the color identity.
         """
-        # For empty color identity (colorless), return cards with empty identity
         if not colors:
+            # Colorless commander: only colorless cards
             cursor = self._db.execute(
-                "SELECT * FROM cards WHERE color_identity = '' "
-                "OR color_identity IS NULL ORDER BY name"
+                "SELECT * FROM cards WHERE (color_identity = '' "
+                "OR color_identity IS NULL) AND legal_commander = 1 "
+                "ORDER BY name"
             )
             return [Card.from_db_row(dict(row)) for row in cursor.fetchall()]
 
-        # Fetch all cards and filter in Python since SQLite doesn't natively
-        # support set-subset operations on comma-separated values
-        cursor = self._db.execute("SELECT * FROM cards ORDER BY name")
-        result = []
-        color_set = set(colors)
-        for row in cursor.fetchall():
-            row_dict = dict(row)
-            card_identity_str = row_dict.get("color_identity", "")
-            if not card_identity_str:
-                # Colorless cards are always within any identity
-                result.append(Card.from_db_row(row_dict))
-            else:
-                card_colors = {
-                    c for c in card_identity_str.split(",") if c
-                }
-                if card_colors.issubset(color_set):
-                    result.append(Card.from_db_row(row_dict))
-        return result
+        all_colors = {"W", "U", "B", "R", "G"}
+        excluded = all_colors - set(colors)
+
+        if not excluded:
+            # 5-color: all commander-legal cards
+            cursor = self._db.execute(
+                "SELECT * FROM cards WHERE legal_commander = 1 ORDER BY name"
+            )
+            return [Card.from_db_row(dict(row)) for row in cursor.fetchall()]
+
+        # Exclude cards containing any color NOT in the commander's identity.
+        # color_identity is stored as comma-separated (e.g. "W,U,B").
+        # For each excluded color, we ensure it doesn't appear in the string.
+        conditions = []
+        params: list[str] = []
+        for color in excluded:
+            conditions.append(
+                "(color_identity NOT LIKE ? AND color_identity NOT LIKE ? "
+                "AND color_identity NOT LIKE ? AND color_identity != ?)"
+            )
+            params.extend([f"%,{color},%", f"{color},%", f"%,{color}", color])
+
+        where = " AND ".join(conditions)
+        sql = (
+            f"SELECT * FROM cards WHERE legal_commander = 1 "
+            f"AND ({where} OR color_identity = '' OR color_identity IS NULL) "
+            f"ORDER BY name"
+        )
+        cursor = self._db.execute(sql, tuple(params))
+        return [Card.from_db_row(dict(row)) for row in cursor.fetchall()]
 
     def bulk_insert_cards(self, cards: list[Card]) -> int:
         """Insert multiple cards in a single transaction.

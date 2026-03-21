@@ -1,5 +1,11 @@
-"""API clients for Scryfall, pricing services, and rate limiting."""
+"""API clients for Scryfall, CommanderSpellbook, pricing services, and rate limiting."""
 
+from mtg_deck_maker.api.commanderspellbook import (
+    CommanderSpellbookError,
+    fetch_combos,
+    fetch_combos_for_cards,
+    load_fallback_combos,
+)
 from mtg_deck_maker.api.rate_limiter import RateLimiter
 from mtg_deck_maker.api.scryfall import (
     ScryfallClient,
@@ -18,6 +24,7 @@ from mtg_deck_maker.api.pricing import (
 )
 
 __all__ = [
+    "CommanderSpellbookError",
     "JustTCGClient",
     "PricingError",
     "PricingNotFoundError",
@@ -29,5 +36,8 @@ __all__ = [
     "ScryfallRateLimitError",
     "ScryfallServerError",
     "TCGAPIsClient",
+    "fetch_combos",
+    "fetch_combos_for_cards",
+    "load_fallback_combos",
     "parse_scryfall_card",
 ]

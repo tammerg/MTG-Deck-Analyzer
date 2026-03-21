@@ -632,3 +632,520 @@ class TestCategoryEnum:
         actual = [c.value for c in Category]
         for exp in expected:
             assert exp in actual, f"Missing category: {exp}"
+
+
+# === Expanded Win Condition Detection ===
+
+
+class TestExpandedWinConditions:
+    def test_extra_combat_is_win_condition(self):
+        """A card granting an additional combat phase is a win condition."""
+        card = _make_card(
+            "Aurelia, the Warleader",
+            type_line="Legendary Creature - Angel",
+            oracle_text="Flying, vigilance, haste\nWhenever Aurelia, the Warleader attacks for the first time each turn, untap all creatures you control. After this phase, there is an additional combat phase.",
+            mana_cost="{2}{R}{R}{W}{W}",
+            cmc=6.0,
+        )
+        cats = categorize_card(card)
+        assert _has_category(cats, Category.WIN_CONDITION.value)
+        conf = _get_confidence(cats, Category.WIN_CONDITION.value)
+        assert conf >= 0.7
+
+    def test_damage_each_opponent_is_win_condition(self):
+        """A card that deals damage to each opponent is a win condition."""
+        card = _make_card(
+            "Purphoros, God of the Forge",
+            type_line="Legendary Enchantment Creature - God",
+            oracle_text="Indestructible\nAs long as your devotion to red is less than five, Purphoros isn't a creature.\nWhenever another creature enters the battlefield under your control, Purphoros deals 2 damage to each opponent.",
+            mana_cost="{3}{R}",
+            cmc=4.0,
+        )
+        cats = categorize_card(card)
+        assert _has_category(cats, Category.WIN_CONDITION.value)
+        conf = _get_confidence(cats, Category.WIN_CONDITION.value)
+        assert conf >= 0.8
+
+    def test_infect_is_win_condition(self):
+        """A card with infect is a win condition."""
+        card = _make_card(
+            "Blighted Agent",
+            type_line="Creature - Phyrexian Human Rogue",
+            oracle_text="Infect (This creature deals damage to creatures in the form of -1/-1 counters and to players in the form of poison counters.)\nBlighted Agent can't be blocked.",
+            mana_cost="{1}{U}",
+            cmc=2.0,
+        )
+        cats = categorize_card(card)
+        assert _has_category(cats, Category.WIN_CONDITION.value)
+        conf = _get_confidence(cats, Category.WIN_CONDITION.value)
+        assert conf >= 0.8
+
+    def test_toxic_is_win_condition(self):
+        """A card with toxic is a win condition."""
+        card = _make_card(
+            "Venerated Rotpriest",
+            type_line="Creature - Phyrexian Druid",
+            oracle_text="Toxic 1 (Players dealt combat damage by this creature also get a poison counter.)\nWhenever a creature you control becomes the target of a spell, target opponent gets a poison counter.",
+            mana_cost="{G}",
+            cmc=1.0,
+        )
+        cats = categorize_card(card)
+        assert _has_category(cats, Category.WIN_CONDITION.value)
+        conf = _get_confidence(cats, Category.WIN_CONDITION.value)
+        assert conf >= 0.7
+
+    def test_mill_opponent_is_win_condition(self):
+        """A card that mills each opponent is a win condition."""
+        card = _make_card(
+            "Maddening Cacophony",
+            type_line="Sorcery",
+            oracle_text="Kicker {3}{U}\nEach opponent mills eight cards. If this spell was kicked, instead each opponent mills half their library, rounded up.",
+            mana_cost="{1}{U}",
+            cmc=2.0,
+        )
+        cats = categorize_card(card)
+        assert _has_category(cats, Category.WIN_CONDITION.value)
+        conf = _get_confidence(cats, Category.WIN_CONDITION.value)
+        assert conf >= 0.7
+
+    def test_double_strike_is_win_condition(self):
+        """A card with double strike is a win condition (low confidence)."""
+        card = _make_card(
+            "Temur Battle Rage",
+            type_line="Instant",
+            oracle_text="Target creature gains double strike until end of turn.",
+            mana_cost="{1}{R}",
+            cmc=2.0,
+        )
+        cats = categorize_card(card)
+        assert _has_category(cats, Category.WIN_CONDITION.value)
+        conf = _get_confidence(cats, Category.WIN_CONDITION.value)
+        assert conf >= 0.6
+
+    def test_opponent_loses_game_is_win_condition(self):
+        """A card that causes an opponent to lose the game is a win condition."""
+        card = _make_card(
+            "Door to Nothingness",
+            type_line="Artifact",
+            oracle_text="{W}{W}{U}{U}{B}{B}{R}{R}{G}{G}, {T}, Sacrifice Door to Nothingness: Target opponent loses the game.",
+            mana_cost="{5}",
+            cmc=5.0,
+        )
+        cats = categorize_card(card)
+        assert _has_category(cats, Category.WIN_CONDITION.value)
+        conf = _get_confidence(cats, Category.WIN_CONDITION.value)
+        assert conf >= 0.9
+
+    def test_removal_not_win_condition(self):
+        """A removal spell should not be categorized as a win condition."""
+        card = _make_card(
+            "Murder",
+            type_line="Instant",
+            oracle_text="Destroy target creature.",
+            mana_cost="{1}{B}{B}",
+            cmc=3.0,
+        )
+        cats = categorize_card(card)
+        assert not _has_category(cats, Category.WIN_CONDITION.value)
+
+
+# === Expanded Pattern Detection ===
+
+
+class TestExpandedPatterns:
+    """Tests for expanded regex patterns covering common card archetypes."""
+
+    # -- Ramp: Treasure tokens --
+
+    def test_treasure_token_is_ramp(self):
+        """Creating a Treasure token is ramp (mana generation)."""
+        card = _make_card(
+            "Dockside Extortionist",
+            type_line="Creature - Goblin Pirate",
+            oracle_text="When Dockside Extortionist enters the battlefield, create a Treasure token for each artifact and enchantment your opponents control.",
+            mana_cost="{1}{R}",
+            cmc=2.0,
+        )
+        cats = categorize_card(card)
+        assert _has_category(cats, Category.RAMP.value)
+
+    def test_treasure_tokens_plural_is_ramp(self):
+        """Creating multiple Treasure tokens is ramp."""
+        card = _make_card(
+            "Smothering Tithe",
+            type_line="Enchantment",
+            oracle_text="Whenever an opponent draws a card, that player may pay {2}. If the player doesn't, you create a Treasure token.",
+            mana_cost="{3}{W}",
+            cmc=4.0,
+        )
+        cats = categorize_card(card)
+        assert _has_category(cats, Category.RAMP.value)
+
+    def test_food_token_is_ramp_low_confidence(self):
+        """Creating Food tokens counts as pseudo-ramp with lower confidence."""
+        card = _make_card(
+            "Gilded Goose",
+            type_line="Creature - Bird",
+            oracle_text="Flying\nWhen Gilded Goose enters the battlefield, create a Food token.\n{1}{G}, {T}: Create a Food token.\n{T}, Sacrifice a Food: Add one mana of any color.",
+            mana_cost="{G}",
+            cmc=1.0,
+        )
+        cats = categorize_card(card)
+        assert _has_category(cats, Category.RAMP.value)
+
+    # -- Ramp: Mana dorks --
+
+    def test_mana_dork_is_ramp(self):
+        """A creature with '{T}: Add {G}' is a mana dork (ramp)."""
+        card = _make_card(
+            "Llanowar Elves",
+            type_line="Creature - Elf Druid",
+            oracle_text="{T}: Add {G}.",
+            mana_cost="{G}",
+            cmc=1.0,
+        )
+        cats = categorize_card(card)
+        assert _has_category(cats, Category.RAMP.value)
+        assert _has_category(cats, Category.CREATURE.value)
+
+    # -- Ramp: Signets/Talismans --
+
+    def test_signet_is_ramp(self):
+        """Signets are 2-CMC artifacts that filter mana."""
+        card = _make_card(
+            "Izzet Signet",
+            type_line="Artifact",
+            oracle_text="{1}, {T}: Add {U}{R}.",
+            mana_cost="{2}",
+            cmc=2.0,
+        )
+        cats = categorize_card(card)
+        assert _has_category(cats, Category.RAMP.value)
+        assert _has_category(cats, Category.ARTIFACT.value)
+
+    # -- Ramp: Negative case --
+
+    def test_sacrifice_treasure_not_ramp(self):
+        """Sacrificing a Treasure to draw is card draw, not ramp."""
+        card = _make_card(
+            "Reckless Fireweaver Variant",
+            type_line="Instant",
+            oracle_text="Sacrifice a Treasure: Draw a card.",
+            mana_cost="{U}",
+            cmc=1.0,
+        )
+        cats = categorize_card(card)
+        assert _has_category(cats, Category.CARD_DRAW.value)
+        assert not _has_category(cats, Category.RAMP.value)
+
+    # -- Card Draw: Impulsive draw --
+
+    def test_impulsive_draw_is_card_draw(self):
+        """Exiling top cards with 'you may play them' is impulsive draw."""
+        card = _make_card(
+            "Light Up the Stage",
+            type_line="Sorcery",
+            oracle_text="Exile the top two cards of your library. Until the end of your next turn, you may play those cards.",
+            mana_cost="{2}{R}",
+            cmc=3.0,
+        )
+        cats = categorize_card(card)
+        assert _has_category(cats, Category.CARD_DRAW.value)
+
+    def test_impulsive_draw_cast_variant(self):
+        """Exiling top cards with 'you may cast' is impulsive draw."""
+        card = _make_card(
+            "Outpost Siege",
+            type_line="Enchantment",
+            oracle_text="At the beginning of your upkeep, exile the top card of your library. You may cast it this turn.",
+            mana_cost="{3}{R}",
+            cmc=4.0,
+        )
+        cats = categorize_card(card)
+        assert _has_category(cats, Category.CARD_DRAW.value)
+
+    # -- Card Draw: Look at top N --
+
+    def test_look_top_put_hand_is_card_draw(self):
+        """'Look at top N...put one into your hand' is card draw."""
+        card = _make_card(
+            "Anticipate",
+            type_line="Instant",
+            oracle_text="Look at the top 3 cards of your library. Put one of them into your hand and the rest on the bottom of your library.",
+            mana_cost="{1}{U}",
+            cmc=2.0,
+        )
+        cats = categorize_card(card)
+        assert _has_category(cats, Category.CARD_DRAW.value)
+
+    # -- Card Draw: Conditional draw --
+
+    def test_conditional_draw_is_card_draw(self):
+        """'Whenever...draw a card' is conditional card draw."""
+        card = _make_card(
+            "Beast Whisperer",
+            type_line="Creature - Elf Druid",
+            oracle_text="Whenever you cast a creature spell, draw a card.",
+            mana_cost="{2}{G}{G}",
+            cmc=4.0,
+        )
+        cats = categorize_card(card)
+        assert _has_category(cats, Category.CARD_DRAW.value)
+
+    # -- Card Draw: Scry --
+
+    def test_scry_is_card_draw_low_confidence(self):
+        """Scry is card selection categorized as card_draw with low confidence."""
+        card = _make_card(
+            "Opt",
+            type_line="Instant",
+            oracle_text="Scry 2.",
+            mana_cost="{U}",
+            cmc=1.0,
+        )
+        cats = categorize_card(card)
+        assert _has_category(cats, Category.CARD_DRAW.value)
+        conf = _get_confidence(cats, Category.CARD_DRAW.value)
+        assert conf <= 0.6
+
+    # -- Card Draw: Surveil --
+
+    def test_surveil_is_card_draw_low_confidence(self):
+        """Surveil is card selection categorized as card_draw with low confidence."""
+        card = _make_card(
+            "Doom Whisperer",
+            type_line="Creature - Nightmare Demon",
+            oracle_text="Flying, trample\nPay 2 life: Surveil 2.",
+            mana_cost="{3}{B}{B}",
+            cmc=5.0,
+        )
+        cats = categorize_card(card)
+        assert _has_category(cats, Category.CARD_DRAW.value)
+        conf = _get_confidence(cats, Category.CARD_DRAW.value)
+        assert conf <= 0.6
+
+    # -- Card Draw: Draw for each --
+
+    def test_draw_for_each_is_card_draw(self):
+        """'Draw a card for each' is scaling card draw."""
+        card = _make_card(
+            "Shamanic Revelation",
+            type_line="Sorcery",
+            oracle_text="Draw a card for each creature you control.",
+            mana_cost="{3}{G}{G}",
+            cmc=5.0,
+        )
+        cats = categorize_card(card)
+        assert _has_category(cats, Category.CARD_DRAW.value)
+
+    # -- Card Draw: Connive --
+
+    def test_connive_is_card_draw(self):
+        """Connive provides card selection (draw + discard)."""
+        card = _make_card(
+            "Ledger Shredder",
+            type_line="Creature - Bird Advisor",
+            oracle_text="Flying\nWhenever a player casts their second spell each turn, Ledger Shredder connives.",
+            mana_cost="{1}{U}",
+            cmc=2.0,
+        )
+        cats = categorize_card(card)
+        assert _has_category(cats, Category.CARD_DRAW.value)
+        conf = _get_confidence(cats, Category.CARD_DRAW.value)
+        assert conf <= 0.7
+
+    # -- Removal: Fights --
+
+    def test_fights_is_removal(self):
+        """'Target creature you control fights target creature' is removal."""
+        card = _make_card(
+            "Prey Upon",
+            type_line="Sorcery",
+            oracle_text="Target creature you control fights target creature you don't control.",
+            mana_cost="{G}",
+            cmc=1.0,
+        )
+        cats = categorize_card(card)
+        assert _has_category(cats, Category.REMOVAL.value)
+
+    def test_fight_singular_is_removal(self):
+        """'fight target creature' (singular) is removal."""
+        card = _make_card(
+            "Inscription of Abundance",
+            type_line="Instant",
+            oracle_text="Target creature you control fight target creature you don't control.",
+            mana_cost="{1}{G}",
+            cmc=2.0,
+        )
+        cats = categorize_card(card)
+        assert _has_category(cats, Category.REMOVAL.value)
+
+    # -- Removal: Bounce --
+
+    def test_bounce_is_removal(self):
+        """'Return target creature to its owner's hand' is soft removal."""
+        card = _make_card(
+            "Unsummon",
+            type_line="Instant",
+            oracle_text="Return target creature to its owner's hand.",
+            mana_cost="{U}",
+            cmc=1.0,
+        )
+        cats = categorize_card(card)
+        assert _has_category(cats, Category.REMOVAL.value)
+        conf = _get_confidence(cats, Category.REMOVAL.value)
+        assert conf <= 0.7
+
+    # -- Removal: Sacrifice-based --
+
+    def test_sacrifice_is_removal(self):
+        """'Each player sacrifices a creature' is sacrifice-based removal."""
+        card = _make_card(
+            "Fleshbag Marauder",
+            type_line="Creature - Zombie Warrior",
+            oracle_text="When Fleshbag Marauder enters the battlefield, each player sacrifices a creature.",
+            mana_cost="{2}{B}",
+            cmc=3.0,
+        )
+        cats = categorize_card(card)
+        assert _has_category(cats, Category.REMOVAL.value)
+
+    # -- Removal: -X/-X without 'until' --
+
+    def test_minus_x_minus_x_is_removal(self):
+        """'-X/-X' effects are removal (existing pattern covers 'until' variant)."""
+        card = _make_card(
+            "Tragic Slip",
+            type_line="Instant",
+            oracle_text="Target creature gets -1/-1 until end of turn.\nMorbid — That creature gets -13/-13 until end of turn instead if a creature died this turn.",
+            mana_cost="{B}",
+            cmc=1.0,
+        )
+        cats = categorize_card(card)
+        assert _has_category(cats, Category.REMOVAL.value)
+
+    def test_permanent_minus_is_removal(self):
+        """'-N/-N' without 'until end of turn' is permanent removal."""
+        card = _make_card(
+            "Dead Weight",
+            type_line="Enchantment - Aura",
+            oracle_text="Enchant creature\nEnchanted creature gets -2/-2.",
+            mana_cost="{B}",
+            cmc=1.0,
+        )
+        cats = categorize_card(card)
+        assert _has_category(cats, Category.REMOVAL.value)
+
+    # -- Removal: Destroy artifact/enchantment --
+
+    def test_destroy_artifact_or_enchantment_is_removal(self):
+        """'Destroy target artifact or enchantment' is non-creature removal."""
+        card = _make_card(
+            "Nature's Claim",
+            type_line="Instant",
+            oracle_text="Destroy target artifact or enchantment. Its controller gains 4 life.",
+            mana_cost="{G}",
+            cmc=1.0,
+        )
+        cats = categorize_card(card)
+        assert _has_category(cats, Category.REMOVAL.value)
+
+    # -- Protection: Ward --
+
+    def test_ward_is_protection(self):
+        """Cards with ward keyword provide protection."""
+        card = _make_card(
+            "Ledger Shredder Ward",
+            type_line="Creature - Bird",
+            oracle_text="Flying\nWard {2}",
+            mana_cost="{1}{U}",
+            cmc=2.0,
+        )
+        cats = categorize_card(card)
+        assert _has_category(cats, Category.PROTECTION.value)
+
+    # -- Protection: Phase out --
+
+    def test_phase_out_is_protection(self):
+        """Phase out provides protection by making a permanent intangible."""
+        card = _make_card(
+            "Teferi's Protection Variant",
+            type_line="Instant",
+            oracle_text="All permanents you control phase out until your next turn.",
+            mana_cost="{2}{W}",
+            cmc=3.0,
+        )
+        cats = categorize_card(card)
+        assert _has_category(cats, Category.PROTECTION.value)
+
+    # -- Protection: Regenerate --
+
+    def test_regenerate_is_protection_low_confidence(self):
+        """Regenerate provides protection with lower confidence."""
+        card = _make_card(
+            "Regeneration Aura",
+            type_line="Enchantment - Aura",
+            oracle_text="{G}: Regenerate enchanted creature.",
+            mana_cost="{1}{G}",
+            cmc=2.0,
+        )
+        cats = categorize_card(card)
+        assert _has_category(cats, Category.PROTECTION.value)
+        conf = _get_confidence(cats, Category.PROTECTION.value)
+        assert conf <= 0.7
+
+    # -- Protection: Totem armor --
+
+    def test_totem_armor_is_protection(self):
+        """Totem armor provides protection for enchanted creatures."""
+        card = _make_card(
+            "Bear Umbra",
+            type_line="Enchantment - Aura",
+            oracle_text="Enchant creature\nEnchanted creature gets +2/+2.\nTotem armor",
+            mana_cost="{2}{G}{G}",
+            cmc=4.0,
+        )
+        cats = categorize_card(card)
+        assert _has_category(cats, Category.PROTECTION.value)
+
+    # -- Board Wipe: Each player sacrifices --
+
+    def test_each_player_sacrifices_is_board_wipe(self):
+        """'Each player sacrifices' is a pseudo-board-wipe."""
+        card = _make_card(
+            "Cataclysm",
+            type_line="Sorcery",
+            oracle_text="Each player chooses from among the permanents they control an artifact, a creature, an enchantment, and a land, then sacrifices the rest.",
+            mana_cost="{2}{W}{W}",
+            cmc=4.0,
+        )
+        cats = categorize_card(card)
+        assert _has_category(cats, Category.BOARD_WIPE.value)
+
+    # -- Board Wipe: Mass bounce --
+
+    def test_mass_bounce_is_board_wipe(self):
+        """'Return all nonland permanents to their owners' hands' is a board wipe."""
+        card = _make_card(
+            "Cyclonic Rift Overloaded",
+            type_line="Instant",
+            oracle_text="Return all nonland permanents you don't control to their owners' hands.",
+            mana_cost="{1}{U}",
+            cmc=2.0,
+        )
+        cats = categorize_card(card)
+        assert _has_category(cats, Category.BOARD_WIPE.value)
+
+    # -- Board Wipe: Damage to each creature --
+
+    def test_damage_each_creature_is_board_wipe(self):
+        """'Deals 3 damage to each creature' is a damage-based board wipe."""
+        card = _make_card(
+            "Anger of the Gods",
+            type_line="Sorcery",
+            oracle_text="Anger of the Gods deals 3 damage to each creature.",
+            mana_cost="{1}{R}{R}",
+            cmc=3.0,
+        )
+        cats = categorize_card(card)
+        assert _has_category(cats, Category.BOARD_WIPE.value)

@@ -55,6 +55,10 @@ _RAMP_PATTERNS: list[tuple[re.Pattern[str], float]] = [
     (re.compile(r"add \{[WUBRGC]", re.IGNORECASE), 0.8),
     (re.compile(r"add one mana of any", re.IGNORECASE), 0.8),
     (re.compile(r"add \w+ mana", re.IGNORECASE), 0.7),
+    # Treasure token creation (mana generation)
+    (re.compile(r"create.*\btreasure\b", re.IGNORECASE), 0.8),
+    # Food token creation (pseudo-ramp, lower confidence)
+    (re.compile(r"create.*\bfood\b", re.IGNORECASE), 0.6),
 ]
 
 _CARD_DRAW_PATTERNS: list[tuple[re.Pattern[str], float]] = [
@@ -63,6 +67,17 @@ _CARD_DRAW_PATTERNS: list[tuple[re.Pattern[str], float]] = [
     (re.compile(r"draw cards", re.IGNORECASE), 0.9),
     (re.compile(r"investigate", re.IGNORECASE), 0.8),
     (re.compile(r"create.*clue", re.IGNORECASE), 0.8),
+    # Impulsive draw: exile top cards + may play/cast
+    (re.compile(r"exile the top.*you may play", re.IGNORECASE), 0.8),
+    (re.compile(r"exile the top.*you may cast", re.IGNORECASE), 0.8),
+    # Look at top N, put into hand
+    (re.compile(r"look at the top.*into your hand", re.IGNORECASE), 0.8),
+    # Scry as card selection (lower confidence)
+    (re.compile(r"\bscry\b", re.IGNORECASE), 0.5),
+    # Surveil as card selection (lower confidence)
+    (re.compile(r"\bsurveil\b", re.IGNORECASE), 0.5),
+    # Connive as card selection (lower confidence)
+    (re.compile(r"\bconnives?\b", re.IGNORECASE), 0.6),
 ]
 
 _REMOVAL_PATTERNS: list[tuple[re.Pattern[str], float]] = [
@@ -70,6 +85,16 @@ _REMOVAL_PATTERNS: list[tuple[re.Pattern[str], float]] = [
     (re.compile(r"exile target", re.IGNORECASE), 0.9),
     (re.compile(r"deals? \d+ damage to.*target", re.IGNORECASE), 0.8),
     (re.compile(r"-\d+/-\d+ until", re.IGNORECASE), 0.7),
+    # Fight-based removal (word boundary to avoid false positives)
+    (re.compile(r"\bfights?\b", re.IGNORECASE), 0.7),
+    # Bounce as soft removal (lower confidence since temporary)
+    (re.compile(r"return target.*to its owner's hand", re.IGNORECASE), 0.6),
+    (re.compile(r"return target.*to their owner's hand", re.IGNORECASE), 0.6),
+    # Sacrifice-based removal
+    (re.compile(r"sacrifices? a creature", re.IGNORECASE), 0.7),
+    (re.compile(r"sacrifices? an? \w+", re.IGNORECASE), 0.6),
+    # Permanent -N/-N effects (without "until" already covered above)
+    (re.compile(r"gets? -\d+/-\d+", re.IGNORECASE), 0.6),
 ]
 
 _BOARD_WIPE_PATTERNS: list[tuple[re.Pattern[str], float]] = [
@@ -77,6 +102,12 @@ _BOARD_WIPE_PATTERNS: list[tuple[re.Pattern[str], float]] = [
     (re.compile(r"exile all", re.IGNORECASE), 0.95),
     (re.compile(r"each.*creature.*gets -", re.IGNORECASE), 0.85),
     (re.compile(r"all creatures get -", re.IGNORECASE), 0.85),
+    # Each player sacrifices (pseudo-wipe)
+    (re.compile(r"each player.*sacrifices", re.IGNORECASE), 0.8),
+    # Mass bounce (return all ... to hands)
+    (re.compile(r"return all.*to their owners'? hands", re.IGNORECASE), 0.85),
+    # Damage-based wipes (deals N damage to each creature)
+    (re.compile(r"deals? \d+ damage to each creature", re.IGNORECASE), 0.85),
 ]
 
 _COUNTERSPELL_PATTERNS: list[tuple[re.Pattern[str], float]] = [
@@ -90,6 +121,14 @@ _PROTECTION_PATTERNS: list[tuple[re.Pattern[str], float]] = [
     (re.compile(r"indestructible", re.IGNORECASE), 0.85),
     (re.compile(r"shroud", re.IGNORECASE), 0.8),
     (re.compile(r"protection from", re.IGNORECASE), 0.8),
+    # Ward keyword
+    (re.compile(r"\bward\b", re.IGNORECASE), 0.8),
+    # Phase out as protection
+    (re.compile(r"\bphase out\b", re.IGNORECASE), 0.8),
+    # Regenerate as protection (lower confidence)
+    (re.compile(r"\bregenerate\b", re.IGNORECASE), 0.6),
+    # Totem armor for enchantment-based protection
+    (re.compile(r"\btotem armor\b", re.IGNORECASE), 0.8),
 ]
 
 _RECURSION_PATTERNS: list[tuple[re.Pattern[str], float]] = [
@@ -98,9 +137,36 @@ _RECURSION_PATTERNS: list[tuple[re.Pattern[str], float]] = [
 ]
 
 _WIN_CONDITION_PATTERNS: list[tuple[re.Pattern[str], float]] = [
+    # Direct win / loss
     (re.compile(r"you win the game", re.IGNORECASE), 1.0),
+    (re.compile(r"opponent.*loses the game", re.IGNORECASE), 0.95),
     (re.compile(r"each opponent loses", re.IGNORECASE), 0.9),
+    # Damage-based
+    (re.compile(r"deals? \d+ damage to each opponent", re.IGNORECASE), 0.85),
+    (re.compile(r"each opponent loses \d+ life", re.IGNORECASE), 0.85),
+    (re.compile(r"deals damage to each opponent equal to", re.IGNORECASE), 0.85),
+    # Poison / Infect
+    (re.compile(r"infect", re.IGNORECASE), 0.85),
+    (re.compile(r"toxic", re.IGNORECASE), 0.8),
+    (re.compile(r"poison counter", re.IGNORECASE), 0.8),
+    # Extra combat
+    (re.compile(r"additional combat phase", re.IGNORECASE), 0.8),
+    (re.compile(r"extra combat", re.IGNORECASE), 0.8),
+    (re.compile(r"additional combat step", re.IGNORECASE), 0.7),
+    # Mill
+    (re.compile(r"each opponent.*mills", re.IGNORECASE), 0.8),
+    (re.compile(r"target opponent.*mills", re.IGNORECASE), 0.75),
+    (re.compile(r"mills? \d+ cards", re.IGNORECASE), 0.7),
+    (re.compile(r"put the top \d+ cards.*into.*graveyard", re.IGNORECASE), 0.7),
+    # Commander damage enablers
+    (re.compile(r"double strike", re.IGNORECASE), 0.7),
     (re.compile(r"commander damage", re.IGNORECASE), 0.6),
+    (re.compile(r"double.*power", re.IGNORECASE), 0.6),
+    (re.compile(r"deals? combat damage to a player", re.IGNORECASE), 0.6),
+    # Large power boosts
+    (re.compile(r"gets? \+\d+/\+\d+", re.IGNORECASE), 0.5),
+    # Enablers
+    (re.compile(r"can't lose the game", re.IGNORECASE), 0.5),
 ]
 
 _TUTOR_PATTERNS: list[tuple[re.Pattern[str], float]] = [

@@ -1,5 +1,6 @@
 """Database layer for SQLite storage, schema management, and repositories."""
 
+from mtg_deck_maker.db.combo_repo import ComboRepository
 from mtg_deck_maker.db.database import Database
 
-__all__ = ["Database"]
+__all__ = ["ComboRepository", "Database"]

@@ -183,6 +183,87 @@ class TestGetPrinting:
         assert found.is_reprint is True
 
 
+class TestGetPrimaryPrinting:
+    """Tests for get_primary_printing (best printing for image display)."""
+
+    def test_returns_none_when_no_printings(
+        self,
+        repos: tuple[CardRepository, PrintingRepository],
+    ) -> None:
+        _, printing_repo = repos
+        result = printing_repo.get_primary_printing(99999)
+        assert result is None
+
+    def test_returns_english_nonpromo_printing(
+        self,
+        repos: tuple[CardRepository, PrintingRepository],
+        card_id: int,
+    ) -> None:
+        _, printing_repo = repos
+
+        promo = Printing(
+            scryfall_id="primary-promo",
+            card_id=card_id,
+            set_code="PRM",
+            collector_number="1",
+            lang="en",
+            released_at="2024-01-01",
+            is_promo=True,
+            is_reprint=False,
+        )
+        nonpromo = Printing(
+            scryfall_id="primary-nonpromo",
+            card_id=card_id,
+            set_code="STD",
+            collector_number="1",
+            lang="en",
+            released_at="2023-01-01",
+            is_promo=False,
+            is_reprint=True,
+        )
+        printing_repo.insert_printing(promo)
+        printing_repo.insert_printing(nonpromo)
+
+        result = printing_repo.get_primary_printing(card_id)
+        assert result is not None
+        # Prefers non-promo over promo even if promo is newer
+        assert result.scryfall_id == "primary-nonpromo"
+
+    def test_prefers_english_over_non_english(
+        self,
+        repos: tuple[CardRepository, PrintingRepository],
+        card_id: int,
+    ) -> None:
+        _, printing_repo = repos
+
+        non_en = Printing(
+            scryfall_id="primary-de",
+            card_id=card_id,
+            set_code="STD",
+            collector_number="1",
+            lang="de",
+            released_at="2024-01-01",
+            is_promo=False,
+            is_reprint=False,
+        )
+        en = Printing(
+            scryfall_id="primary-en",
+            card_id=card_id,
+            set_code="STD",
+            collector_number="2",
+            lang="en",
+            released_at="2022-01-01",
+            is_promo=False,
+            is_reprint=True,
+        )
+        printing_repo.insert_printing(non_en)
+        printing_repo.insert_printing(en)
+
+        result = printing_repo.get_primary_printing(card_id)
+        assert result is not None
+        assert result.lang == "en"
+
+
 class TestBulkInsertPrintings:
     """Test bulk printing insertion."""
 

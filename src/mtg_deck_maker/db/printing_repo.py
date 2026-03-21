@@ -71,6 +71,35 @@ class PrintingRepository:
         )
         return [Printing.from_db_row(dict(row)) for row in cursor.fetchall()]
 
+    def get_primary_printing(self, card_id: int) -> Printing | None:
+        """Get the best printing for image display.
+
+        Prefers English, non-promo printings ordered by most recent release.
+
+        Args:
+            card_id: The card's database ID.
+
+        Returns:
+            The preferred Printing instance, or None if no printings exist.
+        """
+        cursor = self._db.execute(
+            """
+            SELECT * FROM printings
+            WHERE card_id = ?
+            ORDER BY
+                CASE WHEN lang = 'en' THEN 0 ELSE 1 END ASC,
+                CASE WHEN is_promo = 0 THEN 0 ELSE 1 END ASC,
+                released_at DESC,
+                id ASC
+            LIMIT 1
+            """,
+            (card_id,),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        return Printing.from_db_row(dict(row))
+
     def bulk_insert_printings(self, printings: list[Printing]) -> int:
         """Insert multiple printings in a single transaction.
 

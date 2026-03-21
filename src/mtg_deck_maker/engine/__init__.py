@@ -6,6 +6,7 @@ from mtg_deck_maker.engine.categories import (
     bulk_categorize,
 )
 from mtg_deck_maker.engine.synergy import (
+    compute_combo_synergy,
     compute_synergy,
     extract_themes,
     score_theme_match,
@@ -35,6 +36,7 @@ __all__ = [
     "Category",
     "categorize_card",
     "bulk_categorize",
+    "compute_combo_synergy",
     "compute_synergy",
     "extract_themes",
     "score_theme_match",

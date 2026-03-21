@@ -5,9 +5,15 @@ from __future__ import annotations
 import pytest
 
 from mtg_deck_maker.config import AppConfig
+from unittest.mock import patch
+
 from mtg_deck_maker.engine.deck_builder import (
+    ARCHETYPE_CATEGORY_TARGETS,
+    IDEAL_CURVE,
+    Archetype,
     DeckBuildError,
     build_deck,
+    detect_archetype,
     DEFAULT_CATEGORY_TARGETS,
     _normalize_edhrec_rank,
     _get_primary_category,
@@ -715,3 +721,235 @@ class TestGetPrimaryCategory:
         """Empty category list should default to utility."""
         cat, conf = _get_primary_category([])
         assert cat == Category.UTILITY.value
+
+
+class TestArchetypeDetection:
+    """Tests for archetype detection and adaptive category targets."""
+
+    def test_detect_tribal_commander(self):
+        """Commander with creature types referenced in oracle text should be TRIBAL."""
+        commander = _make_card(
+            9100,
+            "Zombie Tribal Lord",
+            type_line="Legendary Creature \u2014 Zombie",
+            oracle_text="Other Zombies you control get +1/+1.",
+            color_identity=["B"],
+        )
+        assert detect_archetype(commander) == Archetype.TRIBAL.value
+
+    def test_detect_spellslinger(self):
+        """Commander with 'whenever you cast an instant or sorcery' should be SPELLSLINGER."""
+        commander = _make_card(
+            9101,
+            "Spell Slinger Leader",
+            type_line="Legendary Creature \u2014 Human Wizard",
+            oracle_text="Whenever you cast an instant or sorcery spell, draw a card.",
+            color_identity=["U", "R"],
+        )
+        assert detect_archetype(commander) == Archetype.SPELLSLINGER.value
+
+    def test_detect_aggro(self):
+        """Commander with attack triggers should be AGGRO."""
+        commander = _make_card(
+            9102,
+            "Aggro Beater",
+            type_line="Legendary Creature \u2014 Warrior",
+            oracle_text="Whenever Aggro Beater attacks, it gets +3/+0 until end of turn.",
+            color_identity=["R"],
+        )
+        assert detect_archetype(commander) == Archetype.AGGRO.value
+
+    def test_detect_control(self):
+        """Commander with 'counter target' should be CONTROL."""
+        commander = _make_card(
+            9103,
+            "Control Master",
+            type_line="Legendary Creature \u2014 Human Wizard",
+            oracle_text="Counter target spell. You gain 2 life.",
+            color_identity=["U", "W"],
+        )
+        assert detect_archetype(commander) == Archetype.CONTROL.value
+
+    def test_detect_default_midrange(self):
+        """Generic commander without clear archetype should be MIDRANGE."""
+        commander = _make_card(
+            9104,
+            "Generic Commander",
+            type_line="Legendary Creature \u2014 Human",
+            oracle_text="Vigilance",
+            color_identity=["W"],
+        )
+        assert detect_archetype(commander) == Archetype.MIDRANGE.value
+
+    def test_archetype_targets_differ_from_default(self):
+        """AGGRO, CONTROL, and DEFAULT targets should not all be the same."""
+        aggro_targets = ARCHETYPE_CATEGORY_TARGETS[Archetype.AGGRO.value]
+        control_targets = ARCHETYPE_CATEGORY_TARGETS[Archetype.CONTROL.value]
+        default_targets = ARCHETYPE_CATEGORY_TARGETS[Archetype.DEFAULT.value]
+        assert aggro_targets != control_targets
+        assert aggro_targets != default_targets
+
+    def test_build_deck_uses_archetype_targets(self, uw_card_pool, config):
+        """build_deck should call optimize_for_budget with archetype-specific targets."""
+        aggro_commander_card = _make_card(
+            9200,
+            "Test Aggro Commander",
+            type_line="Legendary Creature \u2014 Warrior",
+            oracle_text="Whenever Test Aggro Commander attacks, it gets +3/+0.",
+            mana_cost="{2}{W}{U}",
+            cmc=4.0,
+            colors=["W", "U"],
+            color_identity=["W", "U"],
+            keywords=[],
+            edhrec_rank=50,
+        )
+        commander = Commander(primary=aggro_commander_card)
+        prices = _build_prices(uw_card_pool)
+
+        with patch(
+            "mtg_deck_maker.engine.deck_builder.optimize_for_budget",
+            wraps=__import__(
+                "mtg_deck_maker.engine.budget_optimizer", fromlist=["optimize_for_budget"]
+            ).optimize_for_budget,
+        ) as mock_optimize:
+            build_deck(commander, 200.0, uw_card_pool, config, prices=prices)
+            mock_optimize.assert_called_once()
+            # The third argument (category_targets) should be AGGRO targets
+            call_args = mock_optimize.call_args
+            used_targets = call_args[0][2]
+            expected_targets = ARCHETYPE_CATEGORY_TARGETS[Archetype.AGGRO.value]
+            assert used_targets == expected_targets
+
+
+class TestBuildScoredCandidatesWithEdhrec:
+    """Tests for EDHREC per-commander inclusion integration in scoring."""
+
+    def test_build_scored_candidates_with_edhrec_inclusion(self, config):
+        """Card with 80% inclusion should score higher than same card without."""
+        from mtg_deck_maker.engine.deck_builder import _build_scored_candidates
+
+        # Two cards with identical EDHREC rank (rank=10000 normalizes to 0.5)
+        card_a = _make_card(
+            5001, "Card A With Edhrec Data",
+            edhrec_rank=10000,
+            color_identity=["W"],
+        )
+        card_b = _make_card(
+            5002, "Card B Without Edhrec Data",
+            edhrec_rank=10000,
+            color_identity=["W"],
+        )
+
+        categories = {
+            5001: [("ramp", 0.8)],
+            5002: [("ramp", 0.8)],
+        }
+        synergies = {5001: 0.5, 5002: 0.5}
+        prices = {5001: 1.0, 5002: 1.0}
+
+        # With edhrec_inclusion data for card_a (80% inclusion > normalized rank 0.5)
+        edhrec_inclusion = {"Card A With Edhrec Data": 0.80}
+
+        candidates_with = _build_scored_candidates(
+            [card_a, card_b], categories, synergies, prices, config,
+            edhrec_inclusion=edhrec_inclusion,
+        )
+
+        score_a = next(c["score"] for c in candidates_with if c["card"].name == "Card A With Edhrec Data")
+        score_b = next(c["score"] for c in candidates_with if c["card"].name == "Card B Without Edhrec Data")
+
+        # Card A should score higher because 0.80 inclusion > normalized rank for rank=10000
+        assert score_a > score_b
+
+    def test_build_scored_candidates_without_edhrec_falls_back(self, config):
+        """When edhrec_inclusion is None, behavior is unchanged (uses EDHREC rank)."""
+        from mtg_deck_maker.engine.deck_builder import _build_scored_candidates
+
+        card = _make_card(
+            5003, "Fallback Card",
+            edhrec_rank=100,
+            color_identity=["W"],
+        )
+
+        categories = {5003: [("ramp", 0.8)]}
+        synergies = {5003: 0.5}
+        prices = {5003: 1.0}
+
+        # Without edhrec_inclusion (None)
+        candidates_none = _build_scored_candidates(
+            [card], categories, synergies, prices, config,
+            edhrec_inclusion=None,
+        )
+
+        # Without edhrec_inclusion (empty dict)
+        candidates_empty = _build_scored_candidates(
+            [card], categories, synergies, prices, config,
+            edhrec_inclusion={},
+        )
+
+        score_none = candidates_none[0]["score"]
+        score_empty = candidates_empty[0]["score"]
+
+        # Both should produce the same score (fallback to EDHREC rank)
+        assert score_none == score_empty
+
+
+class TestManaCurveShaping:
+    """Tests for mana curve shaping integration in deck builder."""
+
+    def test_ideal_curve_profiles_exist(self):
+        """IDEAL_CURVE should have entries for each archetype."""
+        for archetype in Archetype:
+            assert archetype.value in IDEAL_CURVE, (
+                f"Missing IDEAL_CURVE entry for archetype {archetype.value!r}"
+            )
+
+    def test_ideal_curve_values_sum_to_one(self):
+        """Each ideal curve profile's percentages should sum to approximately 1.0."""
+        for archetype_name, curve in IDEAL_CURVE.items():
+            total = sum(curve.values())
+            assert abs(total - 1.0) < 0.01, (
+                f"IDEAL_CURVE[{archetype_name!r}] sums to {total}, expected ~1.0"
+            )
+
+    def test_build_deck_passes_curve_to_optimizer(self, uw_card_pool, config):
+        """build_deck should pass ideal_curve to optimize_for_budget."""
+        aggro_commander_card = _make_card(
+            9300,
+            "Test Aggro Curve Commander",
+            type_line="Legendary Creature \u2014 Warrior",
+            oracle_text="Whenever Test Aggro Curve Commander attacks, it gets +3/+0.",
+            mana_cost="{2}{W}{U}",
+            cmc=4.0,
+            colors=["W", "U"],
+            color_identity=["W", "U"],
+            keywords=[],
+            edhrec_rank=50,
+        )
+        commander = Commander(primary=aggro_commander_card)
+        prices = _build_prices(uw_card_pool)
+
+        with patch(
+            "mtg_deck_maker.engine.deck_builder.optimize_for_budget",
+            wraps=__import__(
+                "mtg_deck_maker.engine.budget_optimizer", fromlist=["optimize_for_budget"]
+            ).optimize_for_budget,
+        ) as mock_optimize:
+            build_deck(commander, 200.0, uw_card_pool, config, prices=prices)
+            mock_optimize.assert_called_once()
+            call_kwargs = mock_optimize.call_args
+            # Check that ideal_curve keyword argument was passed
+            # It could be positional or keyword; check both
+            if call_kwargs.kwargs.get("ideal_curve") is not None:
+                used_curve = call_kwargs.kwargs["ideal_curve"]
+            else:
+                # Positional: candidates, budget, targets, ideal_curve, total_nonland_target
+                assert len(call_kwargs.args) >= 4, (
+                    "optimize_for_budget should receive ideal_curve argument"
+                )
+                used_curve = call_kwargs.args[3] if len(call_kwargs.args) > 3 else None
+                if used_curve is None:
+                    used_curve = call_kwargs.kwargs.get("ideal_curve")
+
+            expected_curve = IDEAL_CURVE[Archetype.AGGRO.value]
+            assert used_curve == expected_curve

@@ -4,7 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from mtg_deck_maker.engine.budget_optimizer import optimize_for_budget, score_card
+from mtg_deck_maker.engine.budget_optimizer import (
+    compute_curve_penalty,
+    compute_diminishing_penalty,
+    compute_duplicate_penalty,
+    compute_functional_similarity,
+    optimize_for_budget,
+    score_card,
+)
 from mtg_deck_maker.models.card import Card
 
 
@@ -241,3 +248,318 @@ class TestOptimizeForBudget:
         # Cannot fill min of 5 at $10 each within $30 budget, but
         # the optimizer should still try to select as many as possible
         assert total_cost <= budget + 10.0  # Allow some overage since minimums must be met
+
+
+# ===========================================================================
+# compute_curve_penalty tests
+# ===========================================================================
+
+
+def _make_candidate_with_cmc(
+    card_id: int,
+    name: str,
+    score: float,
+    price: float,
+    category: str,
+    cmc: float,
+) -> dict:
+    """Create a candidate dict with a specific CMC for curve shaping tests."""
+    card = Card(
+        oracle_id=f"oracle-{card_id}",
+        name=name,
+        type_line="Instant",
+        oracle_text="",
+        mana_cost="{1}",
+        cmc=cmc,
+        colors=[],
+        color_identity=[],
+        keywords=[],
+        legal_commander=True,
+        id=card_id,
+    )
+    return {
+        "card": card,
+        "card_id": card_id,
+        "score": score,
+        "price": price,
+        "category": category,
+    }
+
+
+class TestCurvePenalty:
+    """Tests for the compute_curve_penalty function."""
+
+    def test_curve_penalty_underfull_bucket(self):
+        """Returns 1.0 when the CMC bucket has room below ideal count."""
+        ideal_curve = {0: 0.02, 1: 0.12, 2: 0.22, 3: 0.22, 4: 0.18, 5: 0.12, 6: 0.07, 7: 0.05}
+        # Ideal count for bucket 3 = 0.22 * 65 = 14.3
+        # Current count = 5 (well under 14.3)
+        current_curve = {3: 5}
+        result = compute_curve_penalty(
+            cmc=3.0,
+            current_curve=current_curve,
+            ideal_curve=ideal_curve,
+            total_nonland_target=65,
+        )
+        assert result == 1.0
+
+    def test_curve_penalty_overfull_bucket(self):
+        """Returns < 1.0 when the CMC bucket is over ideal but under 1.5x."""
+        ideal_curve = {0: 0.02, 1: 0.12, 2: 0.22, 3: 0.22, 4: 0.18, 5: 0.12, 6: 0.07, 7: 0.05}
+        # Ideal count for bucket 3 = 0.22 * 65 = 14.3
+        # Current count = 16 (above 14.3 but below 14.3 * 1.5 = 21.45)
+        current_curve = {3: 16}
+        result = compute_curve_penalty(
+            cmc=3.0,
+            current_curve=current_curve,
+            ideal_curve=ideal_curve,
+            total_nonland_target=65,
+        )
+        assert result < 1.0
+        assert result > 0.3
+
+    def test_curve_penalty_very_overfull(self):
+        """Returns 0.3 when the bucket is at or beyond 1.5x the ideal count."""
+        ideal_curve = {0: 0.02, 1: 0.12, 2: 0.22, 3: 0.22, 4: 0.18, 5: 0.12, 6: 0.07, 7: 0.05}
+        # Ideal count for bucket 3 = 0.22 * 65 = 14.3
+        # 1.5x ideal = 21.45, current count = 25 (well above)
+        current_curve = {3: 25}
+        result = compute_curve_penalty(
+            cmc=3.0,
+            current_curve=current_curve,
+            ideal_curve=ideal_curve,
+            total_nonland_target=65,
+        )
+        assert result == 0.3
+
+    def test_curve_penalty_cmc_clamped_to_7(self):
+        """CMC 9 should go into bucket 7."""
+        ideal_curve = {0: 0.02, 1: 0.12, 2: 0.22, 3: 0.22, 4: 0.18, 5: 0.12, 6: 0.07, 7: 0.05}
+        # Ideal count for bucket 7 = 0.05 * 65 = 3.25
+        # Current count = 0 (underfull)
+        current_curve = {}
+        result = compute_curve_penalty(
+            cmc=9.0,
+            current_curve=current_curve,
+            ideal_curve=ideal_curve,
+            total_nonland_target=65,
+        )
+        assert result == 1.0
+
+    def test_optimize_with_curve_shapes_distribution(self):
+        """Optimize with ideal_curve should produce a more even CMC distribution than without."""
+        # Create candidates heavily skewed toward CMC 5
+        candidates = []
+        idx = 1
+        # 30 cards at CMC 5 (high score)
+        for i in range(30):
+            candidates.append(
+                _make_candidate_with_cmc(
+                    idx, f"Five Drop {i}", score=8.0 - i * 0.01,
+                    price=0.50, category="ramp", cmc=5.0,
+                )
+            )
+            idx += 1
+        # 20 cards at CMC 2 (moderate score)
+        for i in range(20):
+            candidates.append(
+                _make_candidate_with_cmc(
+                    idx, f"Two Drop {i}", score=6.0 - i * 0.01,
+                    price=0.50, category="ramp", cmc=2.0,
+                )
+            )
+            idx += 1
+        # 15 cards at CMC 3 (moderate score)
+        for i in range(15):
+            candidates.append(
+                _make_candidate_with_cmc(
+                    idx, f"Three Drop {i}", score=5.5 - i * 0.01,
+                    price=0.50, category="ramp", cmc=3.0,
+                )
+            )
+            idx += 1
+        # 10 cards at CMC 1 (lower score)
+        for i in range(10):
+            candidates.append(
+                _make_candidate_with_cmc(
+                    idx, f"One Drop {i}", score=4.0 - i * 0.01,
+                    price=0.50, category="ramp", cmc=1.0,
+                )
+            )
+            idx += 1
+
+        targets = {"ramp": (10, 40)}
+        ideal_curve = {
+            0: 0.02, 1: 0.12, 2: 0.22, 3: 0.22, 4: 0.18, 5: 0.12, 6: 0.07, 7: 0.05,
+        }
+
+        # Without curve shaping
+        result_no_curve = optimize_for_budget(candidates, 100.0, targets)
+        # With curve shaping
+        result_with_curve = optimize_for_budget(
+            candidates, 100.0, targets,
+            ideal_curve=ideal_curve,
+            total_nonland_target=40,
+        )
+
+        # Count CMC 5 cards in each result
+        cmc5_no_curve = sum(
+            1 for c in result_no_curve if c["card"].cmc == 5.0
+        )
+        cmc5_with_curve = sum(
+            1 for c in result_with_curve if c["card"].cmc == 5.0
+        )
+
+        # With curve shaping, there should be fewer 5-drops because the
+        # ideal curve only allocates 12% to bucket 5
+        assert cmc5_with_curve < cmc5_no_curve
+
+
+# ===========================================================================
+# compute_diminishing_penalty tests
+# ===========================================================================
+
+
+class TestDiminishingReturns:
+    """Tests for the compute_diminishing_penalty function."""
+
+    def test_penalty_under_max(self):
+        """When current count is below max target, penalty should be 1.0 (no penalty)."""
+        category_counts = {"ramp": 5}
+        category_targets = {"ramp": (3, 8)}
+        result = compute_diminishing_penalty("ramp", category_counts, category_targets)
+        assert result == 1.0
+
+    def test_penalty_at_max(self):
+        """When current count equals max target, penalty should be 0.5."""
+        category_counts = {"ramp": 8}
+        category_targets = {"ramp": (3, 8)}
+        result = compute_diminishing_penalty("ramp", category_counts, category_targets)
+        assert result == 0.5
+
+    def test_penalty_over_max(self):
+        """When current count exceeds max target, penalty should decay exponentially."""
+        category_targets = {"ramp": (3, 8)}
+        # 1 over max: 0.5 ** 2 = 0.25
+        result_1_over = compute_diminishing_penalty(
+            "ramp", {"ramp": 9}, category_targets
+        )
+        assert result_1_over == pytest.approx(0.25)
+
+        # 2 over max: 0.5 ** 3 = 0.125
+        result_2_over = compute_diminishing_penalty(
+            "ramp", {"ramp": 10}, category_targets
+        )
+        assert result_2_over == pytest.approx(0.125)
+
+        # Each additional card over max should have a smaller penalty
+        assert result_2_over < result_1_over
+
+    def test_penalty_no_target(self):
+        """Category not in targets should return 1.0 (no penalty)."""
+        category_counts = {"flex": 15}
+        category_targets = {"ramp": (3, 8)}
+        result = compute_diminishing_penalty("flex", category_counts, category_targets)
+        assert result == 1.0
+
+
+# ===========================================================================
+# compute_functional_similarity tests
+# ===========================================================================
+
+
+class TestFunctionalSimilarity:
+    """Tests for the compute_functional_similarity function."""
+
+    def test_identical_text_high_similarity(self):
+        """Identical oracle text should produce similarity close to 1.0."""
+        text = "Draw two cards. You lose 2 life."
+        result = compute_functional_similarity(text, text)
+        assert result == pytest.approx(1.0)
+
+    def test_different_text_low_similarity(self):
+        """Completely unrelated oracle texts should have low similarity."""
+        text_a = "Destroy all creatures. They can't be regenerated."
+        text_b = "Search your library for a basic land card and put it onto the battlefield tapped."
+        result = compute_functional_similarity(text_a, text_b)
+        assert result < 0.3
+
+    def test_similar_draw_spells(self):
+        """Two 'draw cards' variants should have high similarity."""
+        text_a = "Draw two cards."
+        text_b = "Draw three cards."
+        result = compute_functional_similarity(text_a, text_b)
+        assert result > 0.3
+
+    def test_empty_text(self):
+        """Empty oracle text should return 0.0 similarity."""
+        result = compute_functional_similarity("", "Draw two cards.")
+        assert result == 0.0
+
+    def test_both_empty(self):
+        """Two empty oracle texts should return 0.0."""
+        result = compute_functional_similarity("", "")
+        assert result == 0.0
+
+    def test_reminder_text_stripped(self):
+        """Text in parentheses (reminder text) should be stripped before comparison."""
+        text_a = "Flying (This creature can only be blocked by creatures with flying.)"
+        text_b = "Flying"
+        result = compute_functional_similarity(text_a, text_b)
+        assert result == pytest.approx(1.0)
+
+
+# ===========================================================================
+# compute_duplicate_penalty tests
+# ===========================================================================
+
+
+class TestDuplicatePenalty:
+    """Tests for the compute_duplicate_penalty function."""
+
+    def test_no_duplicates_no_penalty(self):
+        """When no selected card is similar, penalty should be 1.0."""
+        candidate = "Destroy target creature."
+        selected = [
+            "Draw two cards.",
+            "Search your library for a basic land card.",
+        ]
+        result = compute_duplicate_penalty(candidate, selected)
+        assert result == 1.0
+
+    def test_one_duplicate_mild_penalty(self):
+        """When one selected card is similar, penalty should be 0.7."""
+        candidate = "Draw two cards."
+        selected = [
+            "Draw three cards.",  # Very similar
+            "Destroy target creature.",  # Not similar
+        ]
+        result = compute_duplicate_penalty(candidate, selected)
+        assert result == 0.7
+
+    def test_multiple_duplicates_heavy_penalty(self):
+        """When 3+ selected cards are similar, penalty should be 0.2."""
+        candidate = "Draw two cards. Scry 1."
+        selected = [
+            "Draw two cards.",
+            "Draw three cards.",
+            "Draw two cards and lose 2 life.",
+        ]
+        result = compute_duplicate_penalty(candidate, selected)
+        assert result == 0.2
+
+    def test_empty_selected_no_penalty(self):
+        """Empty selected list should return 1.0."""
+        result = compute_duplicate_penalty("Draw two cards.", [])
+        assert result == 1.0
+
+    def test_two_duplicates_moderate_penalty(self):
+        """When exactly 2 selected cards are similar, penalty should be 0.4."""
+        candidate = "Draw two cards. You gain 1 life."
+        selected = [
+            "Draw two cards.",
+            "Draw three cards.",
+            "Destroy target creature.",  # Not similar
+        ]
+        result = compute_duplicate_penalty(candidate, selected)
+        assert result == 0.4

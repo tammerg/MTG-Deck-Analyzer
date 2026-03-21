@@ -8,12 +8,14 @@ mana base construction, and final validation.
 from __future__ import annotations
 
 import random
+import re
+from enum import Enum
 
 from mtg_deck_maker.config import AppConfig
 from mtg_deck_maker.engine.budget_optimizer import optimize_for_budget, score_card
 from mtg_deck_maker.engine.categories import Category, categorize_card
 from mtg_deck_maker.engine.mana_base import build_mana_base, calculate_land_count
-from mtg_deck_maker.engine.synergy import compute_synergy
+from mtg_deck_maker.engine.synergy import compute_combo_synergy, compute_synergy
 from mtg_deck_maker.models.card import Card
 from mtg_deck_maker.models.commander import Commander, CommanderValidationError
 from mtg_deck_maker.models.deck import Deck, DeckCard
@@ -34,9 +36,179 @@ DEFAULT_CATEGORY_TARGETS: dict[str, tuple[int, int]] = {
     Category.PROTECTION.value: (3, 5),
 }
 
+class Archetype(str, Enum):
+    """Commander deck archetype classification."""
+
+    AGGRO = "aggro"
+    CONTROL = "control"
+    COMBO = "combo"
+    MIDRANGE = "midrange"
+    SPELLSLINGER = "spellslinger"
+    TRIBAL = "tribal"
+    DEFAULT = "default"
+
+
+# Archetype-specific category targets: (min, max) slots per archetype
+ARCHETYPE_CATEGORY_TARGETS: dict[str, dict[str, tuple[int, int]]] = {
+    Archetype.AGGRO.value: {
+        Category.RAMP.value: (8, 12),
+        Category.CARD_DRAW.value: (8, 10),
+        Category.REMOVAL.value: (3, 5),
+        Category.BOARD_WIPE.value: (1, 2),
+        Category.WIN_CONDITION.value: (10, 14),
+        Category.PROTECTION.value: (3, 5),
+    },
+    Archetype.CONTROL.value: {
+        Category.RAMP.value: (8, 12),
+        Category.CARD_DRAW.value: (8, 10),
+        Category.REMOVAL.value: (7, 10),
+        Category.BOARD_WIPE.value: (3, 5),
+        Category.COUNTERSPELL.value: (3, 5),
+        Category.WIN_CONDITION.value: (4, 6),
+        Category.PROTECTION.value: (3, 5),
+    },
+    Archetype.COMBO.value: {
+        Category.RAMP.value: (8, 12),
+        Category.CARD_DRAW.value: (10, 14),
+        Category.REMOVAL.value: (3, 5),
+        Category.BOARD_WIPE.value: (2, 4),
+        Category.TUTOR.value: (3, 5),
+        Category.WIN_CONDITION.value: (3, 5),
+        Category.PROTECTION.value: (3, 5),
+    },
+    Archetype.SPELLSLINGER.value: {
+        Category.RAMP.value: (8, 12),
+        Category.CARD_DRAW.value: (10, 14),
+        Category.REMOVAL.value: (5, 7),
+        Category.BOARD_WIPE.value: (2, 4),
+        Category.WIN_CONDITION.value: (5, 8),
+        Category.PROTECTION.value: (4, 6),
+    },
+    Archetype.TRIBAL.value: {
+        Category.RAMP.value: (8, 12),
+        Category.CARD_DRAW.value: (8, 10),
+        Category.REMOVAL.value: (5, 7),
+        Category.BOARD_WIPE.value: (1, 2),
+        Category.WIN_CONDITION.value: (8, 12),
+        Category.PROTECTION.value: (3, 5),
+    },
+    Archetype.MIDRANGE.value: {
+        Category.RAMP.value: (8, 12),
+        Category.CARD_DRAW.value: (8, 10),
+        Category.REMOVAL.value: (5, 7),
+        Category.BOARD_WIPE.value: (2, 4),
+        Category.WIN_CONDITION.value: (7, 10),
+        Category.PROTECTION.value: (3, 5),
+    },
+    Archetype.DEFAULT.value: {
+        Category.RAMP.value: (8, 12),
+        Category.CARD_DRAW.value: (8, 10),
+        Category.REMOVAL.value: (5, 7),
+        Category.BOARD_WIPE.value: (2, 4),
+        Category.WIN_CONDITION.value: (7, 10),
+        Category.PROTECTION.value: (3, 5),
+    },
+}
+
+# Ideal CMC distribution per archetype (% of non-land cards per CMC bucket)
+# Buckets: 0, 1, 2, 3, 4, 5, 6, 7+
+IDEAL_CURVE: dict[str, dict[int, float]] = {
+    "aggro":        {0: 0.02, 1: 0.18, 2: 0.28, 3: 0.22, 4: 0.15, 5: 0.08, 6: 0.05, 7: 0.02},
+    "control":      {0: 0.02, 1: 0.10, 2: 0.20, 3: 0.22, 4: 0.18, 5: 0.13, 6: 0.08, 7: 0.07},
+    "combo":        {0: 0.03, 1: 0.15, 2: 0.25, 3: 0.22, 4: 0.15, 5: 0.10, 6: 0.06, 7: 0.04},
+    "midrange":     {0: 0.02, 1: 0.12, 2: 0.22, 3: 0.22, 4: 0.18, 5: 0.12, 6: 0.07, 7: 0.05},
+    "spellslinger": {0: 0.03, 1: 0.18, 2: 0.28, 3: 0.22, 4: 0.14, 5: 0.08, 6: 0.04, 7: 0.03},
+    "tribal":       {0: 0.02, 1: 0.14, 2: 0.24, 3: 0.24, 4: 0.16, 5: 0.10, 6: 0.06, 7: 0.04},
+    "default":      {0: 0.02, 1: 0.12, 2: 0.22, 3: 0.22, 4: 0.18, 5: 0.12, 6: 0.07, 7: 0.05},
+}
+
 # Synergy and flex categories get the remainder
 SYNERGY_TARGET: tuple[int, int] = (8, 12)
 FLEX_CATEGORY = "flex"
+
+
+# Archetype detection patterns
+_SPELLSLINGER_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"whenever you cast a(n)? (instant|sorcery|noncreature)", re.IGNORECASE),
+    re.compile(r"instant and sorcery", re.IGNORECASE),
+    re.compile(r"magecraft", re.IGNORECASE),
+    re.compile(r"prowess", re.IGNORECASE),
+    re.compile(r"\bstorm\b", re.IGNORECASE),
+]
+
+_COMBO_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"search your library", re.IGNORECASE),
+    re.compile(r"\binfinite\b", re.IGNORECASE),
+    re.compile(r"untap all", re.IGNORECASE),
+]
+
+_AGGRO_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"whenever .+ attacks", re.IGNORECASE),
+    re.compile(r"combat damage to a player", re.IGNORECASE),
+    re.compile(r"additional combat", re.IGNORECASE),
+]
+
+_CONTROL_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"counter target", re.IGNORECASE),
+    re.compile(r"\bexile\b.*\btarget\b", re.IGNORECASE),
+    re.compile(r"\btax\b", re.IGNORECASE),
+    re.compile(r"\bprevent\b", re.IGNORECASE),
+]
+
+
+def detect_archetype(commander: Card) -> str:
+    """Detect the deck archetype from a commander's oracle text and type line.
+
+    Uses pattern matching to classify the commander into an archetype
+    that determines category target distributions.
+
+    Detection priority:
+        1. TRIBAL: commander has creature types referenced in oracle text
+        2. SPELLSLINGER: instants/sorceries-matter triggers
+        3. COMBO: library search, infinite, untap patterns
+        4. AGGRO: attack triggers, combat damage
+        5. CONTROL: counter, exile, tax, prevent
+        6. MIDRANGE: default fallback
+
+    Args:
+        commander: The commander card to analyze.
+
+    Returns:
+        Archetype value string (e.g. "aggro", "tribal").
+    """
+    oracle = commander.oracle_text or ""
+    type_line = commander.type_line or ""
+    oracle_lower = oracle.lower()
+
+    # Check TRIBAL: commander has creature types and oracle text references them
+    if "\u2014" in type_line and "Creature" in type_line:
+        _, subtypes_part = type_line.split("\u2014", 1)
+        creature_types = [t.strip() for t in subtypes_part.strip().split() if t.strip()]
+        for ctype in creature_types:
+            if ctype.lower() in oracle_lower:
+                return Archetype.TRIBAL.value
+
+    # Check SPELLSLINGER
+    for pattern in _SPELLSLINGER_PATTERNS:
+        if pattern.search(oracle):
+            return Archetype.SPELLSLINGER.value
+
+    # Check COMBO
+    for pattern in _COMBO_PATTERNS:
+        if pattern.search(oracle):
+            return Archetype.COMBO.value
+
+    # Check AGGRO
+    for pattern in _AGGRO_PATTERNS:
+        if pattern.search(oracle):
+            return Archetype.AGGRO.value
+
+    # Check CONTROL
+    for pattern in _CONTROL_PATTERNS:
+        if pattern.search(oracle):
+            return Archetype.CONTROL.value
+
+    return Archetype.MIDRANGE.value
 
 
 def _normalize_edhrec_rank(rank: int | None, max_rank: int = 20000) -> float:
@@ -89,33 +261,6 @@ def _get_primary_category(
     return Category.UTILITY.value, 0.5
 
 
-def _assign_card_prices(
-    cards: list[Card],
-    prices: dict[int, float],
-    config: AppConfig,
-) -> dict[int, float]:
-    """Build a card_id -> price mapping, applying config constraints.
-
-    Args:
-        cards: List of cards to price.
-        prices: Known prices mapping card_id -> USD price.
-        config: App configuration with pricing constraints.
-
-    Returns:
-        Dict mapping card_id to effective price.
-    """
-    result: dict[int, float] = {}
-    for card in cards:
-        if card.id is None:
-            continue
-        price = prices.get(card.id, 0.50)  # Default $0.50 for unknown prices
-        # Clamp to max_price_per_card
-        if price > config.constraints.max_price_per_card:
-            price = config.constraints.max_price_per_card + 0.01  # Mark as over-limit
-        result[card.id] = price
-    return result
-
-
 def build_deck(
     commander: Commander,
     budget: float,
@@ -123,6 +268,9 @@ def build_deck(
     config: AppConfig,
     prices: dict[int, float] | None = None,
     seed: int = 42,
+    priority_cards: list[str] | None = None,
+    edhrec_inclusion: dict[str, float] | None = None,
+    combo_partners: dict[str, list[str]] | None = None,
 ) -> Deck:
     """Build a complete 100-card Commander deck from a card pool.
 
@@ -146,6 +294,11 @@ def build_deck(
         config: Application configuration.
         prices: Optional dict mapping card.id -> USD price.
         seed: Random seed for deterministic output.
+        priority_cards: Optional list of card names recommended by LLM.
+        edhrec_inclusion: Optional per-commander card inclusion rates
+            mapping card name -> inclusion rate (0.0 to 1.0).
+        combo_partners: Optional mapping of card name to list of known
+            combo partner card names for combo synergy scoring.
 
     Returns:
         A fully constructed Deck object with exactly 100 cards.
@@ -225,7 +378,10 @@ def build_deck(
 
     # Step 7 & 8: Build candidate list with scores and select via budget optimizer
     candidates = _build_scored_candidates(
-        filtered_pool, card_categories, card_synergies, prices, config
+        filtered_pool, card_categories, card_synergies, prices, config,
+        priority_cards=priority_cards,
+        edhrec_inclusion=edhrec_inclusion,
+        combo_partners=combo_partners,
     )
 
     # Shuffle with seed for tie-breaking determinism
@@ -241,8 +397,19 @@ def build_deck(
     land_budget_estimate = num_lands * 0.30
     nonland_budget = budget - land_budget_estimate
 
+    # Detect archetype and use corresponding category targets
+    archetype = detect_archetype(commander.primary)
+    category_targets = ARCHETYPE_CATEGORY_TARGETS.get(
+        archetype, DEFAULT_CATEGORY_TARGETS
+    )
+
+    # Look up the ideal mana curve for the detected archetype
+    ideal_curve = IDEAL_CURVE.get(archetype, IDEAL_CURVE["default"])
+
     selected = optimize_for_budget(
-        nonland_candidates, nonland_budget, DEFAULT_CATEGORY_TARGETS
+        nonland_candidates, nonland_budget, category_targets,
+        ideal_curve=ideal_curve,
+        total_nonland_target=nonland_card_count,
     )
 
     # Ensure we have exactly the right number of nonland cards
@@ -343,6 +510,9 @@ def _build_scored_candidates(
     synergies: dict[int, float],
     prices: dict[int, float],
     config: AppConfig,
+    priority_cards: list[str] | None = None,
+    edhrec_inclusion: dict[str, float] | None = None,
+    combo_partners: dict[str, list[str]] | None = None,
 ) -> list[dict]:
     """Build scored candidate dicts for the budget optimizer.
 
@@ -352,11 +522,22 @@ def _build_scored_candidates(
         synergies: Synergy scores per card.
         prices: Price per card.
         config: App configuration.
+        priority_cards: Optional list of card names recommended by LLM.
+        edhrec_inclusion: Optional mapping of card name -> per-commander
+            inclusion rate (0.0 to 1.0). When available, replaces the
+            generic EDHREC rank normalization for matching cards.
+        combo_partners: Optional mapping of card name to list of known
+            combo partner card names for combo synergy scoring.
 
     Returns:
         List of candidate dicts with card, score, price, and category info.
     """
     candidates: list[dict] = []
+    priority_set = {n.lower() for n in (priority_cards or [])}
+    priority_bonus = config.llm.priority_bonus
+
+    # Build a set of all candidate card names for combo synergy context
+    all_card_names = {c.name for c in cards}
 
     for card in cards:
         key = card.id if card.id is not None else id(card)
@@ -365,8 +546,12 @@ def _build_scored_candidates(
         synergy = synergies.get(key, 0.0)
         price = prices.get(card.id if card.id is not None else -1, 0.50)
 
-        # Power score from EDHREC rank and category confidence
-        power = _normalize_edhrec_rank(card.edhrec_rank) * 0.6 + confidence * 0.4
+        # Power score: use per-commander inclusion rate if available,
+        # otherwise fall back to generic EDHREC rank normalization.
+        if edhrec_inclusion and card.name in edhrec_inclusion:
+            power = edhrec_inclusion[card.name] * 0.6 + confidence * 0.4
+        else:
+            power = _normalize_edhrec_rank(card.edhrec_rank) * 0.6 + confidence * 0.4
 
         # Minimum synergy floor so all legal cards have some chance
         effective_synergy = max(synergy, 0.1)
@@ -376,6 +561,17 @@ def _build_scored_candidates(
         # Check max price per card constraint
         if price > config.constraints.max_price_per_card:
             final_score *= 0.01  # Heavy penalty, not complete exclusion
+
+        # Apply priority bonus for LLM-recommended cards (additive)
+        if priority_set and card.name.lower() in priority_set:
+            final_score += priority_bonus
+
+        # Apply combo synergy bonus (additive, scaled by relevance)
+        if combo_partners:
+            combo_bonus = compute_combo_synergy(
+                card.name, all_card_names, combo_partners
+            )
+            final_score += combo_bonus * priority_bonus * 0.5
 
         candidates.append({
             "card": card,

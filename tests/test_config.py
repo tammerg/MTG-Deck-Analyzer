@@ -11,6 +11,7 @@ from mtg_deck_maker.config import (
     AppConfig,
     ConstraintsConfig,
     GeneralConfig,
+    LLMConfig,
     PricingConfig,
     load_config,
 )
@@ -43,6 +44,18 @@ class TestDefaultConfig:
         assert config.general.data_dir == "./data"
         assert config.general.cache_ttl_hours == 24
         assert config.general.offline_mode is False
+
+    def test_default_llm(self) -> None:
+        config = AppConfig()
+        assert config.llm.provider == "auto"
+        assert config.llm.openai_model == "gpt-4o"
+        assert config.llm.anthropic_model == "claude-sonnet-4-20250514"
+        assert config.llm.max_tokens == 2048
+        assert config.llm.temperature == 0.7
+        assert config.llm.timeout_s == 60.0
+        assert config.llm.max_retries == 3
+        assert config.llm.research_enabled is True
+        assert config.llm.priority_bonus == 500
 
 
 class TestLoadConfigDefaults:
@@ -356,3 +369,117 @@ class TestDataclassSlots:
 
     def test_app_config_has_slots(self) -> None:
         assert hasattr(AppConfig, "__slots__")
+
+    def test_llm_config_has_slots(self) -> None:
+        assert hasattr(LLMConfig, "__slots__")
+
+
+_ALL_ENV_VARS = [
+    "MTG_DATA_DIR",
+    "MTG_CACHE_TTL_HOURS",
+    "MTG_OFFLINE_MODE",
+    "MTG_PREFERRED_SOURCE",
+    "MTG_PREFERRED_CURRENCY",
+    "MTG_PREFERRED_FINISH",
+    "MTG_MAX_PRICE_PER_CARD",
+    "MTG_LLM_PROVIDER",
+    "MTG_OPENAI_MODEL",
+    "MTG_ANTHROPIC_MODEL",
+    "MTG_LLM_TIMEOUT",
+    "MTG_LLM_MAX_RETRIES",
+]
+
+
+def _clear_env(monkeypatch) -> None:
+    for key in _ALL_ENV_VARS:
+        monkeypatch.delenv(key, raising=False)
+
+
+class TestLLMConfigFromToml:
+    """Test loading LLM config from TOML."""
+
+    def test_load_llm_from_toml(self, tmp_path, monkeypatch) -> None:
+        _clear_env(monkeypatch)
+        config_file = tmp_path / ".mtg-deck-maker.toml"
+        config_file.write_text(
+            """
+[llm]
+provider = "openai"
+openai_model = "gpt-4o-mini"
+anthropic_model = "claude-haiku-4-5-20251001"
+max_tokens = 4096
+temperature = 0.5
+timeout_s = 30.0
+max_retries = 5
+research_enabled = false
+priority_bonus = 300
+"""
+        )
+        config = load_config(config_path=config_file)
+        assert config.llm.provider == "openai"
+        assert config.llm.openai_model == "gpt-4o-mini"
+        assert config.llm.anthropic_model == "claude-haiku-4-5-20251001"
+        assert config.llm.max_tokens == 4096
+        assert config.llm.temperature == 0.5
+        assert config.llm.timeout_s == 30.0
+        assert config.llm.max_retries == 5
+        assert config.llm.research_enabled is False
+        assert config.llm.priority_bonus == 300
+
+    def test_partial_llm_toml(self, tmp_path, monkeypatch) -> None:
+        _clear_env(monkeypatch)
+        config_file = tmp_path / ".mtg-deck-maker.toml"
+        config_file.write_text(
+            """
+[llm]
+provider = "anthropic"
+"""
+        )
+        config = load_config(config_path=config_file)
+        assert config.llm.provider == "anthropic"
+        # Other values remain default
+        assert config.llm.openai_model == "gpt-4o"
+        assert config.llm.max_tokens == 2048
+
+
+class TestLLMConfigFromEnv:
+    """Test LLM environment variable overrides."""
+
+    def test_env_llm_provider(self, monkeypatch) -> None:
+        _clear_env(monkeypatch)
+        monkeypatch.setenv("MTG_LLM_PROVIDER", "anthropic")
+        config = load_config(config_path=Path("/nonexistent.toml"))
+        assert config.llm.provider == "anthropic"
+
+    def test_env_llm_timeout(self, monkeypatch) -> None:
+        _clear_env(monkeypatch)
+        monkeypatch.setenv("MTG_LLM_TIMEOUT", "120.0")
+        config = load_config(config_path=Path("/nonexistent.toml"))
+        assert config.llm.timeout_s == 120.0
+
+    def test_env_llm_model_overrides(self, monkeypatch) -> None:
+        _clear_env(monkeypatch)
+        monkeypatch.setenv("MTG_OPENAI_MODEL", "gpt-4o-mini")
+        monkeypatch.setenv("MTG_ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+        config = load_config(config_path=Path("/nonexistent.toml"))
+        assert config.llm.openai_model == "gpt-4o-mini"
+        assert config.llm.anthropic_model == "claude-haiku-4-5-20251001"
+
+    def test_env_llm_max_retries(self, monkeypatch) -> None:
+        _clear_env(monkeypatch)
+        monkeypatch.setenv("MTG_LLM_MAX_RETRIES", "5")
+        config = load_config(config_path=Path("/nonexistent.toml"))
+        assert config.llm.max_retries == 5
+
+
+class TestLLMConfigFromCli:
+    """Test LLM CLI override precedence."""
+
+    def test_cli_llm_override(self, monkeypatch) -> None:
+        _clear_env(monkeypatch)
+        config = load_config(
+            config_path=Path("/nonexistent.toml"),
+            cli_overrides={"llm.provider": "openai", "llm.priority_bonus": 1000},
+        )
+        assert config.llm.provider == "openai"
+        assert config.llm.priority_bonus == 1000

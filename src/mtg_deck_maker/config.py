@@ -54,12 +54,28 @@ class GeneralConfig:
 
 
 @dataclass(slots=True)
+class LLMConfig:
+    """LLM provider settings."""
+
+    provider: str = "auto"
+    openai_model: str = "gpt-4o"
+    anthropic_model: str = "claude-sonnet-4-20250514"
+    max_tokens: int = 2048
+    temperature: float = 0.7
+    timeout_s: float = 60.0
+    max_retries: int = 3
+    research_enabled: bool = True
+    priority_bonus: int = 500
+
+
+@dataclass(slots=True)
 class AppConfig:
     """Top-level application configuration."""
 
     constraints: ConstraintsConfig = field(default_factory=ConstraintsConfig)
     pricing: PricingConfig = field(default_factory=PricingConfig)
     general: GeneralConfig = field(default_factory=GeneralConfig)
+    llm: LLMConfig = field(default_factory=LLMConfig)
 
 
 def _parse_bool(value: str) -> bool:
@@ -153,6 +169,31 @@ def _apply_toml_to_general(config: GeneralConfig, toml_data: dict) -> None:
         config.offline_mode = bool(section["offline_mode"])
 
 
+def _apply_toml_to_llm(config: LLMConfig, toml_data: dict) -> None:
+    """Apply TOML [llm] section to an LLMConfig."""
+    section = toml_data.get("llm", {})
+    if not section:
+        return
+
+    str_fields = ["provider", "openai_model", "anthropic_model"]
+    for field_name in str_fields:
+        if field_name in section:
+            setattr(config, field_name, str(section[field_name]))
+
+    int_fields = ["max_tokens", "max_retries", "priority_bonus"]
+    for field_name in int_fields:
+        if field_name in section:
+            setattr(config, field_name, int(section[field_name]))
+
+    float_fields = ["temperature", "timeout_s"]
+    for field_name in float_fields:
+        if field_name in section:
+            setattr(config, field_name, float(section[field_name]))
+
+    if "research_enabled" in section:
+        config.research_enabled = bool(section["research_enabled"])
+
+
 def _apply_env_vars(config: AppConfig) -> None:
     """Apply environment variable overrides to config.
 
@@ -164,6 +205,11 @@ def _apply_env_vars(config: AppConfig) -> None:
     - MTG_PREFERRED_CURRENCY -> pricing.preferred_currency
     - MTG_PREFERRED_FINISH -> pricing.preferred_finish
     - MTG_MAX_PRICE_PER_CARD -> constraints.max_price_per_card
+    - MTG_LLM_PROVIDER -> llm.provider
+    - MTG_OPENAI_MODEL -> llm.openai_model
+    - MTG_ANTHROPIC_MODEL -> llm.anthropic_model
+    - MTG_LLM_TIMEOUT -> llm.timeout_s
+    - MTG_LLM_MAX_RETRIES -> llm.max_retries
     """
     env_map = {
         "MTG_DATA_DIR": ("general", "data_dir", str),
@@ -177,6 +223,11 @@ def _apply_env_vars(config: AppConfig) -> None:
             "max_price_per_card",
             float,
         ),
+        "MTG_LLM_PROVIDER": ("llm", "provider", str),
+        "MTG_OPENAI_MODEL": ("llm", "openai_model", str),
+        "MTG_ANTHROPIC_MODEL": ("llm", "anthropic_model", str),
+        "MTG_LLM_TIMEOUT": ("llm", "timeout_s", float),
+        "MTG_LLM_MAX_RETRIES": ("llm", "max_retries", int),
     }
 
     for env_key, (section_name, field_name, converter) in env_map.items():
@@ -234,6 +285,7 @@ def load_config(
         _apply_toml_to_constraints(config.constraints, toml_data)
         _apply_toml_to_pricing(config.pricing, toml_data)
         _apply_toml_to_general(config.general, toml_data)
+        _apply_toml_to_llm(config.llm, toml_data)
 
     # Layer 2: Environment variables
     _apply_env_vars(config)

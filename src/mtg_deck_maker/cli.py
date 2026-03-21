@@ -33,6 +33,10 @@ def cli() -> None:
 @click.option("--power-level", type=int, help="Target power level (1-10).")
 @click.option("--config", "config_file", type=click.Path(), help="Config file path.")
 @click.option("--seed", type=int, default=42, help="Random seed for reproducibility.")
+@click.option("--smart", is_flag=True, default=False, help="Use LLM research to boost card selection.")
+@click.option("--provider", type=click.Choice(["auto", "openai", "anthropic"]), default="auto", help="LLM provider.")
+@click.option("--model", "llm_model", type=str, default=None, help="LLM model override.")
+@click.option("--no-edhrec", is_flag=True, default=False, help="Skip EDHREC data fetching.")
 def build(
     commander: str,
     budget: float,
@@ -41,6 +45,10 @@ def build(
     power_level: int | None,
     config_file: str | None,
     seed: int,
+    smart: bool,
+    provider: str,
+    llm_model: str | None,
+    no_edhrec: bool,
 ) -> None:
     """Generate a Commander deck for the given commander.
 
@@ -50,13 +58,14 @@ def build(
         from rich.console import Console
         from rich.table import Table
 
-        from mtg_deck_maker.config import AppConfig, load_config
-        from mtg_deck_maker.db.card_repo import CardRepository
+        from mtg_deck_maker.config import load_config
         from mtg_deck_maker.db.database import Database
-        from mtg_deck_maker.db.price_repo import PriceRepository
         from mtg_deck_maker.io.csv_export import export_deck_to_csv
-        from mtg_deck_maker.models.commander import Commander
-        from mtg_deck_maker.services.build_service import BuildService, BuildServiceError
+        from mtg_deck_maker.services.build_service import (
+            BuildService,
+            BuildServiceError,
+            CommanderNotFoundError,
+        )
 
         console = Console()
         config = load_config(
@@ -84,87 +93,27 @@ def build(
             sys.exit(1)
 
         with Database(db_path) as db:
-            card_repo = CardRepository(db)
-            price_repo = PriceRepository(db)
-
-            # Look up commander card
-            console.print("[dim]Looking up commander...[/dim]", highlight=False)
-            cmd_card = card_repo.get_card_by_name(commander)
-            if cmd_card is None:
-                # Try fuzzy search
-                results = card_repo.search_cards(commander)
-                if results:
-                    names = [c.name for c in results[:5]]
-                    console.print(
-                        f"[red]Commander '{commander}' not found.[/red]",
-                        highlight=False,
-                    )
-                    console.print("Did you mean:", highlight=False)
-                    for n in names:
-                        console.print(f"  - {n}", highlight=False)
-                else:
-                    console.print(
-                        f"[red]Commander '{commander}' not found in database.[/red]",
-                        highlight=False,
-                    )
-                sys.exit(1)
-
-            # Look up partner if specified
-            partner_card = None
-            if partner:
-                partner_card = card_repo.get_card_by_name(partner)
-                if partner_card is None:
-                    console.print(
-                        f"[red]Partner '{partner}' not found in database.[/red]",
-                        highlight=False,
-                    )
-                    sys.exit(1)
-
-            # Build Commander model
-            cmd = Commander(
-                primary=cmd_card,
-                partner=partner_card,
-            )
-
-            # Get card pool within color identity
-            color_identity = cmd.combined_color_identity()
-            console.print(
-                f"[dim]Loading card pool for {'/'.join(color_identity) or 'colorless'}...[/dim]",
-                highlight=False,
-            )
-            card_pool = card_repo.get_cards_by_color_identity(color_identity)
-            console.print(
-                f"[dim]Found {len(card_pool)} candidates[/dim]",
-                highlight=False,
-            )
-
-            # Get prices from DB (cheapest per card)
-            console.print("[dim]Loading prices...[/dim]", highlight=False)
-            prices: dict[int, float] = {}
-            for card in card_pool:
-                if card.id is not None:
-                    price = price_repo.get_cheapest_price(card.id)
-                    if price is not None:
-                        prices[card.id] = price
-            # Also price the commander
-            if cmd_card.id is not None:
-                cmd_price = price_repo.get_cheapest_price(cmd_card.id)
-                if cmd_price is not None:
-                    prices[cmd_card.id] = cmd_price
-
-            # Build deck
-            console.print("[dim]Building deck...[/dim]", highlight=False)
             service = BuildService(config=config)
             try:
-                result = service.build(
-                    commander=cmd,
+                result = service.build_from_db(
+                    commander_name=commander,
                     budget=budget,
-                    card_pool=card_pool,
-                    prices=prices,
+                    db=db,
+                    partner_name=partner,
                     seed=seed,
+                    smart=smart,
+                    provider=provider,
+                    llm_model=llm_model,
+                    no_edhrec=no_edhrec,
                     export_csv=output is not None,
                     csv_filepath=output,
+                    progress_callback=lambda msg: console.print(
+                        f"[dim]{msg}[/dim]", highlight=False
+                    ),
                 )
+            except CommanderNotFoundError as exc:
+                console.print(f"[red]{exc}[/red]", highlight=False)
+                sys.exit(1)
             except BuildServiceError as exc:
                 console.print(f"[red]Build failed:[/red] {exc}", highlight=False)
                 sys.exit(1)
@@ -362,15 +311,10 @@ def upgrade(deck_file: str, budget: float, focus: str | None) -> None:
 
             # Resolve imported card names to Card objects
             deck_cards = []
-            name_prices: dict[str, float] = {}
             for ic in import_result.cards:
                 card = card_repo.get_card_by_name(ic.name)
                 if card is not None:
                     deck_cards.append(card)
-                    if card.id is not None:
-                        price = price_repo.get_cheapest_price(card.id)
-                        if price is not None:
-                            name_prices[card.name] = price
 
             if not deck_cards:
                 console.print(
@@ -383,12 +327,14 @@ def upgrade(deck_file: str, budget: float, focus: str | None) -> None:
             console.print("[dim]Loading card pool...[/dim]", highlight=False)
             card_pool = card_repo.get_commander_legal_cards()
 
-            # Get prices for pool
-            for card in card_pool:
-                if card.id is not None and card.name not in name_prices:
-                    price = price_repo.get_cheapest_price(card.id)
-                    if price is not None:
-                        name_prices[card.name] = price
+            # Get prices for deck cards + pool in a single bulk query
+            all_ids = [c.id for c in deck_cards if c.id is not None]
+            all_ids.extend(c.id for c in card_pool if c.id is not None)
+            bulk_prices = price_repo.get_cheapest_prices(all_ids)
+            name_prices: dict[str, float] = {}
+            for card in deck_cards + card_pool:
+                if card.id is not None and card.id in bulk_prices:
+                    name_prices[card.name] = bulk_prices[card.id]
 
         # Run upgrade service
         service = UpgradeService()
@@ -441,7 +387,9 @@ def upgrade(deck_file: str, budget: float, focus: str | None) -> None:
 @cli.command()
 @click.argument("deck_file", type=click.Path(exists=True))
 @click.option("--problem", type=str, help="Describe a problem with the deck.")
-def advise(deck_file: str, problem: str | None) -> None:
+@click.option("--provider", type=click.Choice(["auto", "openai", "anthropic"]), default="auto", help="LLM provider.")
+@click.option("--model", "llm_model", type=str, default=None, help="LLM model override.")
+def advise(deck_file: str, problem: str | None, provider: str, llm_model: str | None) -> None:
     """Get AI-powered advice for a deck.
 
     DECK_FILE is the path to a CSV/text deck list file.
@@ -449,6 +397,7 @@ def advise(deck_file: str, problem: str | None) -> None:
     try:
         from rich.console import Console
 
+        from mtg_deck_maker.advisor.llm_provider import get_provider
         from mtg_deck_maker.services.advise_service import AdviseService
         from mtg_deck_maker.services.analyze_service import AnalyzeService
 
@@ -464,7 +413,11 @@ def advise(deck_file: str, problem: str | None) -> None:
         analyze_svc = AnalyzeService()
         analysis = analyze_svc.analyze_from_csv(deck_file)
 
-        advise_svc = AdviseService()
+        llm = get_provider(provider, model=llm_model)
+        if llm:
+            console.print(f"[dim]Using: {llm.name}[/dim]", highlight=False)
+
+        advise_svc = AdviseService(provider=llm)
         advice = advise_svc.get_advice(analysis, question)
 
         console.print("[bold]Advice:[/bold]")
@@ -475,6 +428,166 @@ def advise(deck_file: str, problem: str | None) -> None:
         sys.exit(1)
     except Exception as exc:
         click.echo(f"Error getting advice: {exc}", err=True)
+        sys.exit(1)
+
+
+@cli.command()
+@click.argument("commander")
+@click.option("--budget", type=float, default=None, help="Budget constraint in USD.")
+@click.option("--provider", type=click.Choice(["auto", "openai", "anthropic"]), default="auto", help="LLM provider.")
+@click.option("--model", "llm_model", type=str, default=None, help="LLM model override.")
+@click.option("--format", "output_format", type=click.Choice(["rich", "json", "md"]), default="rich", help="Output format.")
+def research(commander: str, budget: float | None, provider: str, llm_model: str | None, output_format: str) -> None:
+    """Research a commander for deck-building insights.
+
+    COMMANDER is the name of the commander card to research.
+    """
+    try:
+        import json as json_mod
+
+        from rich.console import Console
+        from rich.table import Table
+
+        from mtg_deck_maker.advisor.llm_provider import get_provider
+        from mtg_deck_maker.db.card_repo import CardRepository
+        from mtg_deck_maker.db.database import Database
+        from mtg_deck_maker.services.research_service import ResearchService
+
+        console = Console()
+
+        llm = get_provider(provider, model=llm_model)
+        if llm is None:
+            console.print(
+                "[red]Error:[/red] No LLM provider available. "
+                "Set OPENAI_API_KEY or ANTHROPIC_API_KEY.",
+                highlight=False,
+            )
+            sys.exit(1)
+
+        # Look up commander in DB for oracle text and color identity
+        db_path = _get_db_path()
+        oracle_text = ""
+        color_identity: list[str] = []
+        if db_path.exists():
+            with Database(db_path) as db:
+                card_repo = CardRepository(db)
+                cmd_card = card_repo.get_card_by_name(commander)
+                if cmd_card:
+                    oracle_text = cmd_card.oracle_text
+                    color_identity = list(cmd_card.color_identity)
+
+        colors_str = "/".join(color_identity) if color_identity else "unknown"
+        console.print(
+            f"[bold]Researching:[/bold] {commander} ({colors_str})",
+            highlight=False,
+        )
+        console.print(f"[dim]Using: {llm.name}[/dim]", highlight=False)
+        if budget:
+            console.print(f"[dim]Budget: ${budget:.2f}[/dim]", highlight=False)
+        console.print()
+
+        research_svc = ResearchService(provider=llm)
+        result = research_svc.research_commander(
+            commander_name=commander,
+            oracle_text=oracle_text,
+            color_identity=color_identity,
+            budget=budget,
+        )
+
+        if output_format == "json":
+            data = {
+                "commander": result.commander_name,
+                "strategy_overview": result.strategy_overview,
+                "key_cards": result.key_cards,
+                "budget_staples": result.budget_staples,
+                "combos": result.combos,
+                "win_conditions": result.win_conditions,
+                "cards_to_avoid": result.cards_to_avoid,
+                "parse_success": result.parse_success,
+            }
+            click.echo(json_mod.dumps(data, indent=2))
+            return
+
+        if output_format == "md":
+            lines = [f"# {result.commander_name} Research", ""]
+            lines.append(f"## Strategy Overview\n{result.strategy_overview}\n")
+            if result.key_cards:
+                lines.append("## Key Cards")
+                for c in result.key_cards:
+                    lines.append(f"- {c}")
+                lines.append("")
+            if result.budget_staples:
+                lines.append("## Budget Staples")
+                for c in result.budget_staples:
+                    lines.append(f"- {c}")
+                lines.append("")
+            if result.combos:
+                lines.append("## Notable Combos")
+                for c in result.combos:
+                    lines.append(f"- {c}")
+                lines.append("")
+            if result.win_conditions:
+                lines.append("## Win Conditions")
+                for w in result.win_conditions:
+                    lines.append(f"- {w}")
+                lines.append("")
+            if result.cards_to_avoid:
+                lines.append("## Cards to Avoid")
+                for c in result.cards_to_avoid:
+                    lines.append(f"- {c}")
+            click.echo("\n".join(lines))
+            return
+
+        # Rich format (default)
+        if not result.parse_success:
+            console.print(
+                "[yellow]Warning: Could not parse structured response. "
+                "Showing raw output.[/yellow]"
+            )
+            console.print(result.raw_response, highlight=False)
+            return
+
+        console.print("[bold]Strategy Overview[/bold]")
+        console.print(f"  {result.strategy_overview}", highlight=False)
+        console.print()
+
+        if result.key_cards:
+            table = Table(title=f"Key Cards ({len(result.key_cards)})")
+            table.add_column("Card", style="bold")
+            for card_name in result.key_cards:
+                table.add_row(card_name)
+            console.print(table)
+            console.print()
+
+        if result.budget_staples:
+            table = Table(title=f"Budget Staples ({len(result.budget_staples)})")
+            table.add_column("Card", style="green")
+            for card_name in result.budget_staples:
+                table.add_row(card_name)
+            console.print(table)
+            console.print()
+
+        if result.combos:
+            console.print("[bold]Notable Combos[/bold]")
+            for combo in result.combos:
+                console.print(f"  - {combo}", highlight=False)
+            console.print()
+
+        if result.win_conditions:
+            console.print("[bold]Win Conditions[/bold]")
+            for wc in result.win_conditions:
+                console.print(f"  - {wc}", highlight=False)
+            console.print()
+
+        if result.cards_to_avoid:
+            console.print("[bold red]Cards to Avoid[/bold red]")
+            for card_name in result.cards_to_avoid:
+                console.print(f"  - {card_name}", highlight=False)
+
+    except SystemExit:
+        raise
+    except Exception as exc:
+        click.echo(f"Error researching commander: {exc}", err=True)
         sys.exit(1)
 
 
@@ -705,6 +818,122 @@ def search(query: str, color: str | None, card_type: str | None, limit: int) -> 
         sys.exit(1)
 
 
+@cli.command()
+@click.option("--host", default="127.0.0.1", help="Bind host.")
+@click.option("--port", default=8000, type=int, help="Bind port.")
+@click.option("--reload", is_flag=True, default=False, help="Enable auto-reload.")
+def serve(host: str, port: int, reload: bool) -> None:
+    """Start the web API server."""
+    import uvicorn
+
+    uvicorn.run(
+        "mtg_deck_maker.api.web.app:create_app",
+        factory=True,
+        host=host,
+        port=port,
+        reload=reload,
+    )
+
+
+@cli.command()
+@click.option("--host", default="127.0.0.1", help="Backend bind host.")
+@click.option("--port", default=8000, type=int, help="Backend bind port.")
+@click.option("--frontend-port", default=5173, type=int, help="Frontend dev server port.")
+@click.option("--no-frontend", is_flag=True, default=False, help="Only start the backend API.")
+def dev(host: str, port: int, frontend_port: int, no_frontend: bool) -> None:
+    """Start both the API server and frontend dev server for local development."""
+    import signal
+    import subprocess
+
+    from rich.console import Console
+
+    console = Console()
+
+    frontend_dir = Path(__file__).resolve().parent.parent.parent / "frontend"
+    if not frontend_dir.exists() and not no_frontend:
+        console.print(
+            f"[red]Error:[/red] Frontend directory not found at {frontend_dir}",
+            highlight=False,
+        )
+        console.print(
+            "Run with [bold]--no-frontend[/bold] to start only the API server.",
+            highlight=False,
+        )
+        sys.exit(1)
+
+    procs: list[subprocess.Popen] = []
+
+    def cleanup(signum: int | None = None, frame: object = None) -> None:
+        for p in procs:
+            try:
+                p.terminate()
+            except OSError:
+                pass
+        for p in procs:
+            try:
+                p.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                p.kill()
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, cleanup)
+    signal.signal(signal.SIGTERM, cleanup)
+
+    try:
+        # Start backend
+        console.print(
+            f"[bold green]Starting API server[/bold green] at http://{host}:{port}",
+            highlight=False,
+        )
+        backend = subprocess.Popen(
+            [
+                sys.executable, "-m", "uvicorn",
+                "mtg_deck_maker.api.web.app:create_app",
+                "--factory",
+                f"--host={host}",
+                f"--port={port}",
+                "--reload",
+            ],
+        )
+        procs.append(backend)
+
+        if not no_frontend:
+            # Start frontend
+            console.print(
+                f"[bold green]Starting frontend[/bold green] at http://localhost:{frontend_port}",
+                highlight=False,
+            )
+            frontend = subprocess.Popen(
+                ["npm", "run", "dev", "--", "--port", str(frontend_port)],
+                cwd=str(frontend_dir),
+            )
+            procs.append(frontend)
+            console.print()
+            console.print(
+                f"[bold]Open http://localhost:{frontend_port} in your browser[/bold]",
+                highlight=False,
+            )
+        else:
+            console.print()
+            console.print(
+                f"[bold]API available at http://{host}:{port}/api[/bold]",
+                highlight=False,
+            )
+
+        console.print("[dim]Press Ctrl+C to stop[/dim]", highlight=False)
+
+        # Wait for either process to exit
+        for p in procs:
+            p.wait()
+
+    except KeyboardInterrupt:
+        cleanup()
+    except Exception as exc:
+        cleanup()
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+
 @cli.command("config")
 @click.option("--show", is_flag=True, default=False, help="Display current configuration.")
 def config_cmd(show: bool) -> None:
@@ -784,16 +1013,43 @@ def config_cmd(show: bool) -> None:
 
             console.print(table)
 
-            # Show API key status
-            api_key = os.environ.get("ANTHROPIC_API_KEY")
-            if api_key:
+            # LLM settings table
+            llm_table = Table(title="LLM Settings")
+            llm_table.add_column("Setting", style="cyan")
+            llm_table.add_column("Value")
+            llm_table.add_row("provider", config.llm.provider)
+            llm_table.add_row("openai_model", config.llm.openai_model)
+            llm_table.add_row("anthropic_model", config.llm.anthropic_model)
+            llm_table.add_row("max_tokens", str(config.llm.max_tokens))
+            llm_table.add_row("temperature", str(config.llm.temperature))
+            llm_table.add_row("timeout_s", str(config.llm.timeout_s))
+            llm_table.add_row("max_retries", str(config.llm.max_retries))
+            llm_table.add_row("priority_bonus", str(config.llm.priority_bonus))
+            llm_table.add_row(
+                "research_enabled", str(config.llm.research_enabled)
+            )
+            console.print()
+            console.print(llm_table)
+
+            # Show API key status for both providers
+            console.print()
+            openai_key = os.environ.get("OPENAI_API_KEY")
+            anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
+            if openai_key:
                 console.print(
-                    "\n[green]ANTHROPIC_API_KEY:[/green] configured"
+                    "[green]OPENAI_API_KEY:[/green] configured"
                 )
             else:
                 console.print(
-                    "\n[yellow]ANTHROPIC_API_KEY:[/yellow] not set "
-                    "(LLM advice will be unavailable)"
+                    "[yellow]OPENAI_API_KEY:[/yellow] not set"
+                )
+            if anthropic_key:
+                console.print(
+                    "[green]ANTHROPIC_API_KEY:[/green] configured"
+                )
+            else:
+                console.print(
+                    "[yellow]ANTHROPIC_API_KEY:[/yellow] not set"
                 )
         else:
             console.print(

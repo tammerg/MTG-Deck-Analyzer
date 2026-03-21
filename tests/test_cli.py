@@ -154,15 +154,11 @@ class TestCommandHelp:
 
 
 class TestBuildCommand:
-    @patch("mtg_deck_maker.io.csv_export.export_deck_to_csv")
     @patch("mtg_deck_maker.services.build_service.BuildService")
-    @patch("mtg_deck_maker.db.price_repo.PriceRepository")
-    @patch("mtg_deck_maker.db.card_repo.CardRepository")
     @patch("mtg_deck_maker.db.database.Database")
     @patch("mtg_deck_maker.cli._get_db_path")
     def test_build_runs(
-        self, mock_db_path, mock_db_cls, mock_card_repo_cls,
-        mock_price_repo_cls, mock_build_svc_cls, mock_export, runner,
+        self, mock_db_path, mock_db_cls, mock_build_svc_cls, runner,
     ):
         """build should execute without crashing."""
         from mtg_deck_maker.services.build_service import BuildResult
@@ -170,30 +166,18 @@ class TestBuildCommand:
         mock_db_path.return_value = _mock_db_path()
         mock_db_cls.return_value.__exit__ = MagicMock(return_value=False)
 
-        cmd_card = _make_card(
-            "Atraxa, Praetors' Voice", 1, ["W", "U", "B", "G"], 4.0,
-        )
-        pool_card = _make_card("Sol Ring", 2, [], 1.0, "Artifact")
-
-        mock_card_repo_cls.return_value.get_card_by_name.return_value = cmd_card
-        mock_card_repo_cls.return_value.get_cards_by_color_identity.return_value = [pool_card]
-        mock_price_repo_cls.return_value.get_cheapest_price.return_value = 3.0
-        mock_build_svc_cls.return_value.build.return_value = BuildResult(
+        mock_build_svc_cls.return_value.build_from_db.return_value = BuildResult(
             deck=_make_deck("Atraxa Deck"),
         )
 
         result = runner.invoke(cli, ["build", "Atraxa, Praetors' Voice"])
         assert result.exit_code == 0
 
-    @patch("mtg_deck_maker.io.csv_export.export_deck_to_csv")
     @patch("mtg_deck_maker.services.build_service.BuildService")
-    @patch("mtg_deck_maker.db.price_repo.PriceRepository")
-    @patch("mtg_deck_maker.db.card_repo.CardRepository")
     @patch("mtg_deck_maker.db.database.Database")
     @patch("mtg_deck_maker.cli._get_db_path")
     def test_build_with_options(
-        self, mock_db_path, mock_db_cls, mock_card_repo_cls,
-        mock_price_repo_cls, mock_build_svc_cls, mock_export, runner,
+        self, mock_db_path, mock_db_cls, mock_build_svc_cls, runner,
     ):
         """build should accept all options."""
         from mtg_deck_maker.services.build_service import BuildResult
@@ -201,12 +185,7 @@ class TestBuildCommand:
         mock_db_path.return_value = _mock_db_path()
         mock_db_cls.return_value.__exit__ = MagicMock(return_value=False)
 
-        cmd_card = _make_card("Atraxa", 1, ["W", "U", "B", "G"], 4.0)
-
-        mock_card_repo_cls.return_value.get_card_by_name.return_value = cmd_card
-        mock_card_repo_cls.return_value.get_cards_by_color_identity.return_value = []
-        mock_price_repo_cls.return_value.get_cheapest_price.return_value = 2.0
-        mock_build_svc_cls.return_value.build.return_value = BuildResult(
+        mock_build_svc_cls.return_value.build_from_db.return_value = BuildResult(
             deck=_make_deck("Atraxa Deck"),
         )
 
@@ -256,7 +235,9 @@ class TestUpgradeCommand:
         mock_card_repo_cls.return_value.get_commander_legal_cards.return_value = [
             sol_ring, swords, counterspell,
         ]
-        mock_price_repo_cls.return_value.get_cheapest_price.return_value = 2.0
+        mock_price_repo_cls.return_value.get_cheapest_prices.return_value = {
+            1: 2.0, 2: 2.0, 3: 2.0,
+        }
 
         mock_upgrade_svc_cls.return_value.recommend_from_cards.return_value = (
             MagicMock(), [],
@@ -282,7 +263,7 @@ class TestUpgradeCommand:
 
         mock_card_repo_cls.return_value.get_card_by_name.return_value = sol_ring
         mock_card_repo_cls.return_value.get_commander_legal_cards.return_value = [sol_ring]
-        mock_price_repo_cls.return_value.get_cheapest_price.return_value = 3.0
+        mock_price_repo_cls.return_value.get_cheapest_prices.return_value = {1: 3.0}
 
         mock_upgrade_svc_cls.return_value.recommend_from_cards.return_value = (
             MagicMock(), [],
@@ -409,3 +390,246 @@ class TestConfigCommand:
         """config --show should display configuration."""
         result = runner.invoke(cli, ["config", "--show"])
         assert result.exit_code == 0
+
+
+# === Research Command ===
+
+
+class TestResearchCommand:
+    def test_research_help(self, runner):
+        """research --help should show research command usage."""
+        result = runner.invoke(cli, ["research", "--help"])
+        assert result.exit_code == 0
+        assert "commander" in result.output.lower()
+        assert "--provider" in result.output
+        assert "--model" in result.output
+        assert "--format" in result.output
+
+    @patch("mtg_deck_maker.services.research_service.ResearchService")
+    @patch("mtg_deck_maker.db.card_repo.CardRepository")
+    @patch("mtg_deck_maker.db.database.Database")
+    @patch("mtg_deck_maker.cli._get_db_path")
+    @patch("mtg_deck_maker.advisor.llm_provider.get_provider")
+    def test_research_rich_format(
+        self, mock_get_provider, mock_db_path, mock_db_cls,
+        mock_card_repo_cls, mock_research_svc_cls, runner,
+    ):
+        """research should display rich output by default."""
+        from mtg_deck_maker.services.research_service import ResearchResult
+
+        mock_provider = MagicMock()
+        mock_provider.name = "Fake Provider"
+        mock_get_provider.return_value = mock_provider
+
+        mock_db_path.return_value = _mock_db_path()
+        mock_db_cls.return_value.__exit__ = MagicMock(return_value=False)
+
+        cmd_card = _make_card(
+            "Atraxa, Praetors' Voice", 1, ["W", "U", "B", "G"], 4.0,
+        )
+        mock_card_repo_cls.return_value.get_card_by_name.return_value = cmd_card
+
+        mock_research_svc_cls.return_value.research_commander.return_value = ResearchResult(
+            commander_name="Atraxa, Praetors' Voice",
+            strategy_overview="Proliferate strategy.",
+            key_cards=["Doubling Season", "Deepglow Skate"],
+            parse_success=True,
+        )
+
+        result = runner.invoke(cli, ["research", "Atraxa, Praetors' Voice"])
+        assert result.exit_code == 0
+        assert "Strategy Overview" in result.output
+
+    @patch("mtg_deck_maker.services.research_service.ResearchService")
+    @patch("mtg_deck_maker.db.card_repo.CardRepository")
+    @patch("mtg_deck_maker.db.database.Database")
+    @patch("mtg_deck_maker.cli._get_db_path")
+    @patch("mtg_deck_maker.advisor.llm_provider.get_provider")
+    def test_research_json_format(
+        self, mock_get_provider, mock_db_path, mock_db_cls,
+        mock_card_repo_cls, mock_research_svc_cls, runner,
+    ):
+        """research --format json should output JSON."""
+        from mtg_deck_maker.services.research_service import ResearchResult
+
+        mock_provider = MagicMock()
+        mock_provider.name = "Fake Provider"
+        mock_get_provider.return_value = mock_provider
+
+        mock_db_path.return_value = _mock_db_path()
+        mock_db_cls.return_value.__exit__ = MagicMock(return_value=False)
+        mock_card_repo_cls.return_value.get_card_by_name.return_value = None
+
+        mock_research_svc_cls.return_value.research_commander.return_value = ResearchResult(
+            commander_name="Atraxa",
+            strategy_overview="Proliferate.",
+            key_cards=["Sol Ring"],
+            parse_success=True,
+        )
+
+        result = runner.invoke(cli, ["research", "Atraxa", "--format", "json"])
+        assert result.exit_code == 0
+        assert '"commander"' in result.output
+        assert '"strategy_overview"' in result.output
+
+    @patch("mtg_deck_maker.services.research_service.ResearchService")
+    @patch("mtg_deck_maker.db.card_repo.CardRepository")
+    @patch("mtg_deck_maker.db.database.Database")
+    @patch("mtg_deck_maker.cli._get_db_path")
+    @patch("mtg_deck_maker.advisor.llm_provider.get_provider")
+    def test_research_md_format(
+        self, mock_get_provider, mock_db_path, mock_db_cls,
+        mock_card_repo_cls, mock_research_svc_cls, runner,
+    ):
+        """research --format md should output markdown."""
+        from mtg_deck_maker.services.research_service import ResearchResult
+
+        mock_provider = MagicMock()
+        mock_provider.name = "Fake Provider"
+        mock_get_provider.return_value = mock_provider
+
+        mock_db_path.return_value = _mock_db_path()
+        mock_db_cls.return_value.__exit__ = MagicMock(return_value=False)
+        mock_card_repo_cls.return_value.get_card_by_name.return_value = None
+
+        mock_research_svc_cls.return_value.research_commander.return_value = ResearchResult(
+            commander_name="Atraxa",
+            strategy_overview="Go wide.",
+            key_cards=["Sol Ring"],
+            parse_success=True,
+        )
+
+        result = runner.invoke(cli, ["research", "Atraxa", "--format", "md"])
+        assert result.exit_code == 0
+        assert "# Atraxa Research" in result.output
+
+    def test_research_no_provider(self, runner):
+        """research should fail gracefully without an API key."""
+        env = dict(os.environ)
+        env.pop("OPENAI_API_KEY", None)
+        env.pop("ANTHROPIC_API_KEY", None)
+        result = runner.invoke(cli, ["research", "Atraxa"], env=env)
+        assert result.exit_code != 0
+
+
+# === Smart Build Flag ===
+
+
+class TestBuildSmartFlag:
+    @patch("mtg_deck_maker.services.build_service.BuildService")
+    @patch("mtg_deck_maker.db.database.Database")
+    @patch("mtg_deck_maker.cli._get_db_path")
+    def test_smart_no_provider_degrades_gracefully(
+        self, mock_db_path, mock_db_cls, mock_build_svc_cls, runner,
+    ):
+        """build --smart should delegate to build_from_db with smart=True."""
+        from mtg_deck_maker.services.build_service import BuildResult
+
+        mock_db_path.return_value = _mock_db_path()
+        mock_db_cls.return_value.__exit__ = MagicMock(return_value=False)
+
+        mock_build_svc_cls.return_value.build_from_db.return_value = BuildResult(
+            deck=_make_deck("Atraxa Deck"),
+        )
+
+        env = dict(os.environ)
+        env.pop("OPENAI_API_KEY", None)
+        env.pop("ANTHROPIC_API_KEY", None)
+        result = runner.invoke(cli, ["build", "Atraxa", "--smart"], env=env)
+        assert result.exit_code == 0
+        # Verify smart=True was passed
+        call_kwargs = mock_build_svc_cls.return_value.build_from_db.call_args
+        assert call_kwargs.kwargs.get("smart") is True
+
+    @patch("mtg_deck_maker.services.build_service.BuildService")
+    @patch("mtg_deck_maker.db.database.Database")
+    @patch("mtg_deck_maker.cli._get_db_path")
+    def test_smart_with_provider(
+        self, mock_db_path, mock_db_cls, mock_build_svc_cls, runner,
+    ):
+        """build --smart --provider should pass provider flag to build_from_db."""
+        from mtg_deck_maker.services.build_service import BuildResult
+
+        mock_db_path.return_value = _mock_db_path()
+        mock_db_cls.return_value.__exit__ = MagicMock(return_value=False)
+
+        mock_build_svc_cls.return_value.build_from_db.return_value = BuildResult(
+            deck=_make_deck("Atraxa Deck"),
+        )
+
+        result = runner.invoke(cli, ["build", "Atraxa", "--smart", "--provider", "openai"])
+        assert result.exit_code == 0
+        call_kwargs = mock_build_svc_cls.return_value.build_from_db.call_args
+        assert call_kwargs.kwargs.get("smart") is True
+        assert call_kwargs.kwargs.get("provider") == "openai"
+
+
+# === Provider and Model Flags ===
+
+
+class TestProviderAndModelFlags:
+    def test_build_accepts_provider_flag(self, runner):
+        """build --provider should be accepted without error."""
+        result = runner.invoke(cli, ["build", "--help"])
+        assert "--provider" in result.output
+        assert "openai" in result.output
+        assert "anthropic" in result.output
+
+    def test_build_accepts_model_flag(self, runner):
+        """build --model should be accepted without error."""
+        result = runner.invoke(cli, ["build", "--help"])
+        assert "--model" in result.output
+
+    def test_advise_accepts_provider_flag(self, runner):
+        """advise --provider should be accepted without error."""
+        result = runner.invoke(cli, ["advise", "--help"])
+        assert "--provider" in result.output
+
+    def test_advise_accepts_model_flag(self, runner):
+        """advise --model should be accepted without error."""
+        result = runner.invoke(cli, ["advise", "--help"])
+        assert "--model" in result.output
+
+    def test_research_accepts_provider_flag(self, runner):
+        """research --provider should be accepted without error."""
+        result = runner.invoke(cli, ["research", "--help"])
+        assert "--provider" in result.output
+
+    def test_research_accepts_model_flag(self, runner):
+        """research --model should be accepted without error."""
+        result = runner.invoke(cli, ["research", "--help"])
+        assert "--model" in result.output
+
+    @patch("mtg_deck_maker.services.research_service.ResearchService")
+    @patch("mtg_deck_maker.db.card_repo.CardRepository")
+    @patch("mtg_deck_maker.db.database.Database")
+    @patch("mtg_deck_maker.cli._get_db_path")
+    @patch("mtg_deck_maker.advisor.llm_provider.get_provider")
+    def test_research_passes_model_to_provider(
+        self, mock_get_provider, mock_db_path, mock_db_cls,
+        mock_card_repo_cls, mock_research_svc_cls, runner,
+    ):
+        """research --model should pass the model override to get_provider."""
+        from mtg_deck_maker.services.research_service import ResearchResult
+
+        mock_provider = MagicMock()
+        mock_provider.name = "Fake Provider"
+        mock_get_provider.return_value = mock_provider
+
+        mock_db_path.return_value = _mock_db_path()
+        mock_db_cls.return_value.__exit__ = MagicMock(return_value=False)
+        mock_card_repo_cls.return_value.get_card_by_name.return_value = None
+
+        mock_research_svc_cls.return_value.research_commander.return_value = ResearchResult(
+            commander_name="Atraxa",
+            parse_success=True,
+        )
+
+        runner.invoke(cli, [
+            "research", "Atraxa",
+            "--provider", "anthropic",
+            "--model", "claude-opus-4-20250514",
+        ])
+        mock_get_provider.assert_called_once_with(
+            "anthropic", model="claude-opus-4-20250514"
+        )

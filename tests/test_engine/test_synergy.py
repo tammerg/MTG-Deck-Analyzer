@@ -6,6 +6,9 @@ import pytest
 
 from mtg_deck_maker.models.card import Card
 from mtg_deck_maker.engine.synergy import (
+    _compute_tribal_synergy,
+    _extract_creature_types,
+    compute_combo_synergy,
     compute_synergy,
     extract_themes,
     score_theme_match,
@@ -398,3 +401,245 @@ class TestComputeSynergy:
         )
         score = compute_synergy(commander, candidate)
         assert 0.0 <= score <= 1.0
+
+
+# === Tribal Synergy ===
+
+
+class TestTribalSynergy:
+    def test_extract_creature_types_basic(self):
+        """'Creature \u2014 Zombie Wizard' should extract {'Zombie', 'Wizard'}."""
+        card = _make_card(
+            "Zombie Wizard",
+            type_line="Creature \u2014 Zombie Wizard",
+        )
+        result = _extract_creature_types(card)
+        assert result == {"Zombie", "Wizard"}
+
+    def test_extract_creature_types_legendary(self):
+        """'Legendary Creature \u2014 Goblin' should extract {'Goblin'}."""
+        card = _make_card(
+            "Legendary Goblin",
+            type_line="Legendary Creature \u2014 Goblin",
+        )
+        result = _extract_creature_types(card)
+        assert result == {"Goblin"}
+
+    def test_extract_creature_types_no_dash(self):
+        """'Instant' should return an empty set."""
+        card = _make_card(
+            "Lightning Bolt",
+            type_line="Instant",
+        )
+        result = _extract_creature_types(card)
+        assert result == set()
+
+    def test_extract_creature_types_artifact_creature(self):
+        """'Artifact Creature \u2014 Golem' should extract {'Golem'}."""
+        card = _make_card(
+            "Stone Golem",
+            type_line="Artifact Creature \u2014 Golem",
+        )
+        result = _extract_creature_types(card)
+        assert result == {"Golem"}
+
+    def test_tribal_synergy_shared_type(self):
+        """Zombie commander + Zombie candidate should produce a high score."""
+        commander = _make_card(
+            "Zombie Lord",
+            type_line="Legendary Creature \u2014 Zombie",
+            oracle_text="Other Zombies you control get +1/+1.",
+            color_identity=["B"],
+        )
+        candidate = _make_card(
+            "Zombie Knight",
+            type_line="Creature \u2014 Zombie Knight",
+            color_identity=["B"],
+        )
+        score = _compute_tribal_synergy(commander, candidate)
+        assert score >= 0.5
+
+    def test_tribal_synergy_no_shared_type(self):
+        """Zombie commander + Elf candidate should return 0.0."""
+        commander = _make_card(
+            "Zombie Lord",
+            type_line="Legendary Creature \u2014 Zombie",
+            oracle_text="Other Zombies you control get +1/+1.",
+            color_identity=["B"],
+        )
+        candidate = _make_card(
+            "Elf Scout",
+            type_line="Creature \u2014 Elf Scout",
+            color_identity=["G"],
+        )
+        score = _compute_tribal_synergy(commander, candidate)
+        assert score == 0.0
+
+    def test_tribal_synergy_noncreature_candidate(self):
+        """Zombie commander + Instant candidate should return 0.0."""
+        commander = _make_card(
+            "Zombie Lord",
+            type_line="Legendary Creature \u2014 Zombie",
+            oracle_text="Other Zombies you control get +1/+1.",
+            color_identity=["B"],
+        )
+        candidate = _make_card(
+            "Dark Ritual",
+            type_line="Instant",
+            oracle_text="Add {B}{B}{B}.",
+            color_identity=["B"],
+        )
+        score = _compute_tribal_synergy(commander, candidate)
+        assert score == 0.0
+
+    def test_tribal_synergy_noncreature_commander(self):
+        """Enchantment commander + any creature should return 0.0."""
+        commander = _make_card(
+            "Enchantment Leader",
+            type_line="Legendary Enchantment",
+            oracle_text="Whenever you cast an enchantment spell, draw a card.",
+            color_identity=["W"],
+        )
+        candidate = _make_card(
+            "Zombie Knight",
+            type_line="Creature \u2014 Zombie Knight",
+            color_identity=["B"],
+        )
+        score = _compute_tribal_synergy(commander, candidate)
+        assert score == 0.0
+
+    def test_synergy_weights_sum_to_one(self):
+        """The four synergy weights should sum to 1.0."""
+        keyword_weight = 0.25
+        theme_weight = 0.35
+        color_weight = 0.20
+        tribal_weight = 0.20
+        total = keyword_weight + theme_weight + color_weight + tribal_weight
+        assert abs(total - 1.0) < 1e-9
+
+    def test_compute_synergy_includes_tribal(self):
+        """A Zombie commander should score a Zombie candidate higher than an Elf."""
+        commander = _make_card(
+            "Zombie Commander",
+            type_line="Legendary Creature \u2014 Zombie",
+            oracle_text="Other Zombies you control get +1/+1.",
+            color_identity=["B"],
+            keywords=[],
+        )
+        zombie_candidate = _make_card(
+            "Zombie Soldier",
+            type_line="Creature \u2014 Zombie",
+            oracle_text="",
+            color_identity=["B"],
+            keywords=[],
+        )
+        elf_candidate = _make_card(
+            "Elf Warrior",
+            type_line="Creature \u2014 Elf",
+            oracle_text="",
+            color_identity=["B"],
+            keywords=[],
+        )
+        zombie_score = compute_synergy(commander, zombie_candidate)
+        elf_score = compute_synergy(commander, elf_candidate)
+        assert zombie_score > elf_score
+
+
+# === Combo Synergy ===
+
+
+class TestComboSynergy:
+    def test_combo_synergy_with_partner_in_deck(self):
+        """A card with a combo partner already in the deck should score high."""
+        combo_partners = {
+            "Exquisite Blood": ["Sanguine Bond", "Vito, Thorn of the Dusk Rose"],
+            "Sanguine Bond": ["Exquisite Blood"],
+        }
+        deck_card_names = {"Sanguine Bond", "Sol Ring", "Swamp"}
+        score = compute_combo_synergy(
+            "Exquisite Blood", deck_card_names, combo_partners
+        )
+        # Partner is in deck, should be high (0.8-1.0)
+        assert score >= 0.8
+        assert score <= 1.0
+
+    def test_combo_synergy_no_partners(self):
+        """A card with no combo partners at all should score 0.0."""
+        combo_partners: dict[str, list[str]] = {}
+        deck_card_names = {"Sol Ring", "Swamp"}
+        score = compute_combo_synergy(
+            "Lightning Bolt", deck_card_names, combo_partners
+        )
+        assert score == 0.0
+
+    def test_combo_synergy_partner_in_pool(self):
+        """A card with combo partners known but none in deck should score moderate."""
+        combo_partners = {
+            "Exquisite Blood": ["Sanguine Bond", "Vito, Thorn of the Dusk Rose"],
+        }
+        deck_card_names = {"Sol Ring", "Swamp"}  # No partners in deck
+        score = compute_combo_synergy(
+            "Exquisite Blood", deck_card_names, combo_partners
+        )
+        # Partners exist in the pool but not in deck: moderate (0.3-0.5)
+        assert score >= 0.3
+        assert score <= 0.5
+
+    def test_combo_synergy_card_not_in_partners_map(self):
+        """A card not in the combo_partners map should score 0.0."""
+        combo_partners = {
+            "Exquisite Blood": ["Sanguine Bond"],
+        }
+        deck_card_names = {"Exquisite Blood"}
+        score = compute_combo_synergy(
+            "Sol Ring", deck_card_names, combo_partners
+        )
+        assert score == 0.0
+
+    def test_combo_synergy_multiple_partners_in_deck(self):
+        """Multiple combo partners in deck should still cap at 1.0."""
+        combo_partners = {
+            "Exquisite Blood": ["Sanguine Bond", "Vito, Thorn of the Dusk Rose"],
+        }
+        deck_card_names = {
+            "Sanguine Bond",
+            "Vito, Thorn of the Dusk Rose",
+        }
+        score = compute_combo_synergy(
+            "Exquisite Blood", deck_card_names, combo_partners
+        )
+        assert score >= 0.8
+        assert score <= 1.0
+
+
+# === Infect Theme ===
+
+
+class TestInfectTheme:
+    def test_infect_theme_detected(self):
+        """A commander with 'infect' in oracle text should have infect theme."""
+        commander = _make_card(
+            "Atraxa, Praetors' Voice",
+            type_line="Legendary Creature - Phyrexian Angel Horror",
+            oracle_text="Flying, vigilance, deathtouch, lifelink\nInfect\nAt the beginning of your end step, proliferate.",
+            mana_cost="{G}{W}{U}{B}",
+            cmc=4.0,
+            keywords=["Flying", "Vigilance", "Deathtouch", "Lifelink"],
+            color_identity=["W", "U", "B", "G"],
+        )
+        themes = extract_themes(commander)
+        assert "infect" in themes
+
+    def test_infect_theme_score(self):
+        """A candidate with 'proliferate' should score well against infect commander."""
+        themes = ["infect"]
+        candidate = _make_card(
+            "Thrummingbird",
+            type_line="Creature - Bird Horror",
+            oracle_text="Flying\nWhenever Thrummingbird deals combat damage to a player, proliferate.",
+            mana_cost="{1}{U}",
+            cmc=2.0,
+            color_identity=["U"],
+        )
+        score = score_theme_match(themes, candidate)
+        assert score > 0.3

@@ -73,6 +73,12 @@ _THEME_PATTERNS: dict[str, list[tuple[re.Pattern[str], float]]] = {
         (re.compile(r"sacrifice.*creature", re.IGNORECASE), 0.7),
         (re.compile(r"whenever.*dies", re.IGNORECASE), 0.8),
     ],
+    "infect": [
+        (re.compile(r"infect", re.IGNORECASE), 1.0),
+        (re.compile(r"poison counter", re.IGNORECASE), 0.9),
+        (re.compile(r"toxic", re.IGNORECASE), 0.9),
+        (re.compile(r"proliferate", re.IGNORECASE), 0.7),
+    ],
 }
 
 # Shared keyword groups for overlap detection
@@ -257,6 +263,64 @@ def _compute_color_synergy(commander: Card, candidate: Card) -> float:
     return len(overlap) / len(cmd_identity)
 
 
+def _extract_creature_types(card: Card) -> set[str]:
+    """Extract creature types from a card's type_line.
+
+    The type_line format uses an em-dash (\u2014) to separate supertypes/types
+    from subtypes, e.g. "Legendary Creature \u2014 Zombie Wizard".
+    Everything after the em-dash is split into individual creature types.
+
+    Args:
+        card: Card to extract creature types from.
+
+    Returns:
+        Set of creature type strings. Empty if the card has no subtypes.
+    """
+    type_line = card.type_line or ""
+    if "\u2014" not in type_line:
+        return set()
+
+    _, subtypes_part = type_line.split("\u2014", 1)
+    types = {t.strip() for t in subtypes_part.strip().split() if t.strip()}
+    return types
+
+
+def _compute_tribal_synergy(commander: Card, candidate: Card) -> float:
+    """Compute tribal synergy based on shared creature types.
+
+    Args:
+        commander: The commander card.
+        candidate: The candidate card.
+
+    Returns:
+        Score from 0.0 to 1.0:
+        - 1.0 if the candidate shares the commander's primary (first) creature type
+        - 0.5 if the candidate shares a secondary creature type
+        - 0.0 if no shared types, or either card is not a creature
+    """
+    cmd_types = _extract_creature_types(commander)
+    if not cmd_types:
+        return 0.0
+
+    cand_types = _extract_creature_types(candidate)
+    if not cand_types:
+        return 0.0
+
+    shared = cmd_types.intersection(cand_types)
+    if not shared:
+        return 0.0
+
+    # Determine primary type: first type after the em-dash in commander's type_line
+    type_line = commander.type_line or ""
+    _, subtypes_part = type_line.split("\u2014", 1)
+    ordered_types = [t.strip() for t in subtypes_part.strip().split() if t.strip()]
+
+    if ordered_types and ordered_types[0] in shared:
+        return 1.0
+
+    return 0.5
+
+
 def compute_synergy(commander: Card, candidate: Card) -> float:
     """Compute overall synergy score between a commander and a candidate card.
 
@@ -271,9 +335,10 @@ def compute_synergy(commander: Card, candidate: Card) -> float:
         Float score from 0.0 to 1.0 representing overall synergy.
     """
     # Weight factors for each component
-    keyword_weight = 0.35
-    theme_weight = 0.40
-    color_weight = 0.25
+    keyword_weight = 0.25
+    theme_weight = 0.35
+    color_weight = 0.20
+    tribal_weight = 0.20
 
     keyword_score = _compute_keyword_overlap(commander, candidate)
 
@@ -282,10 +347,51 @@ def compute_synergy(commander: Card, candidate: Card) -> float:
 
     color_score = _compute_color_synergy(commander, candidate)
 
+    tribal_score = _compute_tribal_synergy(commander, candidate)
+
     raw_score = (
         keyword_score * keyword_weight
         + theme_score * theme_weight
         + color_score * color_weight
+        + tribal_score * tribal_weight
     )
 
     return min(1.0, max(0.0, raw_score))
+
+
+def compute_combo_synergy(
+    card_name: str,
+    deck_card_names: set[str],
+    combo_partners: dict[str, list[str]],
+) -> float:
+    """Compute combo synergy bonus for a candidate card.
+
+    Checks whether the candidate card has known combo partners and whether
+    any of those partners are already in the deck.
+
+    Args:
+        card_name: Name of the candidate card.
+        deck_card_names: Set of card names already selected for the deck.
+        combo_partners: Mapping of card name to list of known combo
+            partner card names.
+
+    Returns:
+        Float score:
+        - 0.0 if the card has no known combo partners.
+        - 0.3 to 0.5 if the card has combo partners but none are in the deck.
+        - 0.8 to 1.0 if at least one combo partner is already in the deck.
+    """
+    partners = combo_partners.get(card_name)
+    if not partners:
+        return 0.0
+
+    partners_in_deck = [p for p in partners if p in deck_card_names]
+
+    if partners_in_deck:
+        # At least one partner is in the deck -- high bonus
+        # Scale slightly by how many partners are present
+        ratio = min(len(partners_in_deck) / len(partners), 1.0)
+        return 0.8 + 0.2 * ratio
+
+    # Partners exist but are not yet in the deck -- moderate bonus
+    return 0.4

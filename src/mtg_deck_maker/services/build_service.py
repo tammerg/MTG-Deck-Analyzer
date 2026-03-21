@@ -6,6 +6,9 @@ and CSV export to produce a complete Commander deck from input parameters.
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Callable
+
 from mtg_deck_maker.config import AppConfig
 from mtg_deck_maker.engine.deck_builder import DeckBuildError, build_deck
 from mtg_deck_maker.io.csv_export import export_deck_to_csv
@@ -13,9 +16,15 @@ from mtg_deck_maker.models.card import Card
 from mtg_deck_maker.models.commander import Commander
 from mtg_deck_maker.models.deck import Deck
 
+logger = logging.getLogger(__name__)
+
 
 class BuildServiceError(Exception):
     """Raised when the build service encounters an error."""
+
+
+class CommanderNotFoundError(BuildServiceError):
+    """Commander or partner not found in database."""
 
 
 class BuildResult:
@@ -66,6 +75,8 @@ class BuildService:
         seed: int = 42,
         export_csv: bool = False,
         csv_filepath: str | None = None,
+        priority_cards: list[str] | None = None,
+        edhrec_inclusion: dict[str, float] | None = None,
     ) -> BuildResult:
         """Execute the full deck build pipeline.
 
@@ -82,6 +93,9 @@ class BuildService:
             seed: Random seed for deterministic output.
             export_csv: Whether to generate CSV output.
             csv_filepath: File path to write CSV (if export_csv is True).
+            priority_cards: Optional list of card names recommended by LLM.
+            edhrec_inclusion: Optional per-commander card inclusion rates
+                mapping card name -> inclusion rate (0.0 to 1.0).
 
         Returns:
             BuildResult containing the deck, warnings, and optional CSV.
@@ -107,6 +121,8 @@ class BuildService:
                 config=self.config,
                 prices=prices,
                 seed=seed,
+                priority_cards=priority_cards,
+                edhrec_inclusion=edhrec_inclusion,
             )
         except DeckBuildError as exc:
             raise BuildServiceError(f"Deck build failed: {exc}") from exc
@@ -142,4 +158,176 @@ class BuildService:
             deck=deck,
             warnings=warnings,
             csv_output=csv_output,
+        )
+
+    def build_from_db(
+        self,
+        commander_name: str,
+        budget: float,
+        db: object,
+        *,
+        partner_name: str | None = None,
+        seed: int = 42,
+        smart: bool = False,
+        provider: str = "auto",
+        llm_model: str | None = None,
+        no_edhrec: bool = False,
+        export_csv: bool = False,
+        csv_filepath: str | None = None,
+        progress_callback: Callable[[str], None] | None = None,
+    ) -> BuildResult:
+        """Execute the full build pipeline using the card database.
+
+        Consolidates the build orchestration that was duplicated between
+        the CLI and web API.  Steps:
+            1. Look up commander (and optional partner) in the DB.
+            2. Build Commander model.
+            3. Load card pool by color identity.
+            4. Load prices in bulk.
+            5. Fetch EDHREC per-commander data (unless disabled).
+            6. Run smart LLM research (if requested).
+            7. Delegate to ``self.build()`` with all gathered data.
+
+        Args:
+            commander_name: Exact name of the commander card.
+            budget: Total deck budget in USD.
+            db: A ``Database`` instance (open connection).
+            partner_name: Optional partner commander name.
+            seed: Random seed for reproducibility.
+            smart: Whether to run LLM-assisted research.
+            provider: LLM provider selector ("auto", "openai", "anthropic").
+            llm_model: Optional LLM model override.
+            no_edhrec: Skip EDHREC data fetching.
+            export_csv: Whether to generate CSV output.
+            csv_filepath: File path for CSV export.
+            progress_callback: Optional callable receiving status messages.
+
+        Returns:
+            BuildResult with the constructed deck.
+
+        Raises:
+            CommanderNotFoundError: If commander or partner is not in the DB.
+            BuildServiceError: If the build fails.
+        """
+        from mtg_deck_maker.db.card_repo import CardRepository
+        from mtg_deck_maker.db.price_repo import PriceRepository
+
+        def _progress(msg: str) -> None:
+            if progress_callback is not None:
+                progress_callback(msg)
+
+        card_repo = CardRepository(db)
+        price_repo = PriceRepository(db)
+
+        # 1. Look up commander
+        _progress("Looking up commander...")
+        cmd_card = card_repo.get_card_by_name(commander_name)
+        if cmd_card is None:
+            suggestions = card_repo.search_cards(commander_name)
+            hint = ""
+            if suggestions:
+                names = [c.name for c in suggestions[:5]]
+                hint = f" Did you mean: {', '.join(names)}?"
+            raise CommanderNotFoundError(
+                f"Commander '{commander_name}' not found in database.{hint}"
+            )
+
+        # 2. Optional partner
+        partner_card = None
+        if partner_name:
+            partner_card = card_repo.get_card_by_name(partner_name)
+            if partner_card is None:
+                raise CommanderNotFoundError(
+                    f"Partner '{partner_name}' not found in database."
+                )
+
+        cmd = Commander(primary=cmd_card, partner=partner_card)
+        color_identity = cmd.combined_color_identity()
+
+        # 3. Card pool
+        _progress(
+            f"Loading card pool for {'/'.join(color_identity) or 'colorless'}..."
+        )
+        card_pool = card_repo.get_cards_by_color_identity(color_identity)
+        _progress(f"Found {len(card_pool)} candidates")
+
+        # 4. Bulk prices
+        _progress("Loading prices...")
+        card_ids = [c.id for c in card_pool if c.id is not None]
+        if cmd_card.id is not None:
+            card_ids.append(cmd_card.id)
+        if partner_card is not None and partner_card.id is not None:
+            card_ids.append(partner_card.id)
+        prices = price_repo.get_cheapest_prices(card_ids)
+
+        # 5. EDHREC per-commander data
+        edhrec_inclusion: dict[str, float] | None = None
+        if not no_edhrec:
+            try:
+                from mtg_deck_maker.api.edhrec import fetch_commander_data
+                from mtg_deck_maker.db.edhrec_repo import EdhrecRepository
+
+                edhrec_repo = EdhrecRepository(db)
+                edhrec_repo.create_tables()
+
+                cmd_name = cmd_card.name
+                if not edhrec_repo.has_data(cmd_name) or edhrec_repo.is_stale(cmd_name):
+                    _progress("Fetching EDHREC data...")
+                    edhrec_data = fetch_commander_data(cmd_name)
+                    if edhrec_data:
+                        edhrec_repo.upsert_data(edhrec_data)
+                        _progress(f"Cached {len(edhrec_data)} EDHREC cards for {cmd_name}")
+
+                if edhrec_repo.has_data(cmd_name):
+                    top_cards = edhrec_repo.get_top_cards(cmd_name, limit=500)
+                    edhrec_inclusion = {
+                        c.card_name: c.inclusion_rate for c in top_cards
+                    }
+                    _progress(f"Using {len(edhrec_inclusion)} EDHREC card ratings")
+            except Exception as exc:
+                logger.warning("EDHREC data unavailable: %s", exc)
+                _progress(f"EDHREC data unavailable: {exc}")
+
+        # 6. Smart research
+        priority_cards: list[str] | None = None
+        if smart:
+            try:
+                from mtg_deck_maker.advisor.llm_provider import get_provider
+                from mtg_deck_maker.services.research_service import ResearchService
+
+                llm = get_provider(provider, model=llm_model)
+                if llm is None:
+                    _progress("No LLM provider available, skipping smart research")
+                else:
+                    _progress(f"Researching {commander_name} via {llm.name}...")
+                    research_svc = ResearchService(provider=llm)
+                    research = research_svc.research_commander(
+                        commander_name=commander_name,
+                        oracle_text=cmd_card.oracle_text,
+                        color_identity=color_identity,
+                        budget=budget,
+                    )
+                    if research.parse_success and research.key_cards:
+                        priority_cards = research.key_cards
+                        _progress(
+                            f"LLM recommended {len(priority_cards)} priority cards"
+                        )
+                    elif not research.parse_success:
+                        _progress("LLM response could not be parsed")
+            except Exception as exc:
+                logger.warning("Smart build research failed: %s", exc)
+                _progress(f"Smart build research failed: {exc}")
+
+        # 7. Build
+        _progress("Building deck...")
+        return self.build(
+            commander=cmd,
+            budget=budget,
+            card_pool=card_pool,
+            prices=prices,
+            seed=seed,
+            export_csv=export_csv,
+            csv_filepath=csv_filepath,
+            priority_cards=priority_cards,
+            edhrec_inclusion=edhrec_inclusion,
         )

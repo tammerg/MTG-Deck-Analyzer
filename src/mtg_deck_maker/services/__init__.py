@@ -5,9 +5,15 @@ from mtg_deck_maker.services.build_service import (
     BuildService,
     BuildServiceError,
 )
+from mtg_deck_maker.services.research_service import (
+    ResearchResult,
+    ResearchService,
+)
 
 __all__ = [
     "BuildResult",
     "BuildService",
     "BuildServiceError",
+    "ResearchResult",
+    "ResearchService",
 ]

@@ -41,6 +41,7 @@ class TestAdviseService:
             deck_analysis=analysis,
             question="I run out of cards too fast",
             api_key="test-key",
+            provider=None,
         )
 
     def test_service_initialization(self):

@@ -8,19 +8,26 @@ from __future__ import annotations
 
 from mtg_deck_maker.advisor.analyzer import DeckAnalysis
 from mtg_deck_maker.advisor.llm_advisor import get_deck_advice
+from mtg_deck_maker.advisor.llm_provider import LLMProvider
 
 
 class AdviseService:
     """Wraps the LLM advisor with service-level orchestration."""
 
-    def __init__(self, api_key: str | None = None) -> None:
+    def __init__(
+        self,
+        api_key: str | None = None,
+        provider: LLMProvider | None = None,
+    ) -> None:
         """Initialize the advise service.
 
         Args:
-            api_key: Optional Anthropic API key. If None, the advisor
-                will check the ANTHROPIC_API_KEY environment variable.
+            api_key: Optional API key (deprecated, kept for compat).
+            provider: Optional LLMProvider instance. If None, the advisor
+                will auto-detect an available provider.
         """
         self._api_key = api_key
+        self._provider = provider
 
     def get_advice(
         self,
@@ -40,4 +47,5 @@ class AdviseService:
             deck_analysis=deck_analysis,
             question=question,
             api_key=self._api_key,
+            provider=self._provider,
         )

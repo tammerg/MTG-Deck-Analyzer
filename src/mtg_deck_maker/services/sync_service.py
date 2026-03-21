@@ -18,8 +18,14 @@ from typing import Any, Callable
 
 import httpx
 
+from mtg_deck_maker.api.commanderspellbook import (
+    CommanderSpellbookError,
+    fetch_combos,
+    load_fallback_combos,
+)
 from mtg_deck_maker.api.scryfall import ScryfallClient, parse_scryfall_card
 from mtg_deck_maker.config import AppConfig, load_config
+from mtg_deck_maker.db.combo_repo import ComboRepository
 from mtg_deck_maker.db.database import Database
 
 logger = logging.getLogger(__name__)
@@ -36,6 +42,7 @@ class SyncResult:
     cards_updated: int = 0
     printings_added: int = 0
     prices_added: int = 0
+    combos_synced: int = 0
     duration_seconds: float = 0.0
     errors: list[str] = field(default_factory=list)
 
@@ -51,6 +58,8 @@ class SyncResult:
             lines.append(f"Cards updated: {self.cards_updated}")
         lines.append(f"Printings added: {self.printings_added}")
         lines.append(f"Prices added: {self.prices_added}")
+        if self.combos_synced:
+            lines.append(f"Combos synced: {self.combos_synced}")
         lines.append(f"Duration: {self.duration_seconds:.1f}s")
         if self.errors:
             lines.append(f"Errors: {len(self.errors)}")
@@ -331,6 +340,10 @@ class SyncService:
             callback("Processing cards", 0, len(card_data))
 
         _process_cards(card_data, db, result, callback)
+
+        # Step 4: Sync combos from CommanderSpellbook
+        await self._sync_combos(db, result, callback)
+
         return result
 
     async def _incremental_sync(
@@ -377,6 +390,48 @@ class SyncService:
 
         _process_cards(updated_cards, db, result, callback)
         return result
+
+    async def _sync_combos(
+        self,
+        db: Database,
+        result: SyncResult,
+        callback: Callable[[str, int, int], None] | None,
+    ) -> None:
+        """Fetch and store combo data from CommanderSpellbook.
+
+        Attempts the API first; falls back to the bundled static JSON file
+        if the API is unavailable.
+
+        Args:
+            db: Active Database connection.
+            result: SyncResult to accumulate statistics into.
+            callback: Optional progress callback.
+        """
+        if callback:
+            callback("Syncing combos", 0, 0)
+
+        combo_repo = ComboRepository(db)
+        combo_repo.create_tables()
+
+        try:
+            combos = await fetch_combos()
+            logger.info(
+                "Fetched %d combos from CommanderSpellbook API", len(combos)
+            )
+        except CommanderSpellbookError as exc:
+            logger.warning(
+                "CommanderSpellbook API unavailable (%s), using fallback",
+                exc,
+            )
+            combos = load_fallback_combos()
+            logger.info("Loaded %d combos from fallback file", len(combos))
+
+        for i, combo in enumerate(combos):
+            combo_repo.upsert_combo(combo)
+            if callback and i % 500 == 0:
+                callback("Syncing combos", i, len(combos))
+
+        result.combos_synced = len(combos)
 
     async def _download_bulk_json(
         self,

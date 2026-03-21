@@ -11,6 +11,7 @@ from mtg_deck_maker.advisor.llm_advisor import (
     _build_context,
     get_deck_advice,
 )
+from mtg_deck_maker.advisor.llm_provider import LLMProvider
 
 
 # === Context Building ===
@@ -67,138 +68,84 @@ class TestBuildContext:
         assert "Deck Analysis Context" in context
 
 
-# === get_deck_advice ===
+# === get_deck_advice with provider ===
 
 
-class TestGetDeckAdvice:
-    def test_no_api_key(self):
-        """Should return fallback message when no API key is available."""
-        with patch.dict("os.environ", {}, clear=True):
+class _FakeProvider(LLMProvider):
+    """Fake LLM provider for testing."""
+
+    def __init__(self, response: str = "") -> None:
+        self._response = response
+
+    def chat(self, messages, *, max_tokens=1024, temperature=0.7, timeout_s=60.0) -> str:
+        return self._response
+
+    def is_available(self) -> bool:
+        return True
+
+    @property
+    def name(self) -> str:
+        return "Fake"
+
+
+class TestGetDeckAdviceWithProvider:
+    def test_provider_used(self):
+        """Should use the provided LLMProvider."""
+        provider = _FakeProvider(response="Add more ramp sources.")
+        result = get_deck_advice(
+            DeckAnalysis(), "What do I need?", provider=provider
+        )
+        assert result == "Add more ramp sources."
+
+    def test_provider_empty_response(self):
+        """Should handle empty provider response."""
+        provider = _FakeProvider(response="")
+        result = get_deck_advice(
+            DeckAnalysis(), "Help", provider=provider
+        )
+        assert "no response" in result.lower()
+
+    def test_provider_rate_limit(self):
+        """Should handle rate limit from provider."""
+        provider = MagicMock(spec=LLMProvider)
+        provider.chat.side_effect = Exception("429 rate_limit")
+        result = get_deck_advice(
+            DeckAnalysis(), "Help", provider=provider
+        )
+        assert "rate limit" in result.lower()
+
+    def test_provider_generic_error(self):
+        """Should handle generic error from provider."""
+        provider = MagicMock(spec=LLMProvider)
+        provider.chat.side_effect = Exception("Connection refused")
+        result = get_deck_advice(
+            DeckAnalysis(), "Help", provider=provider
+        )
+        assert "Failed to get LLM advice" in result
+
+
+# === get_deck_advice legacy path ===
+
+
+class TestGetDeckAdviceNoProvider:
+    """Tests for the fallback path when no LLM provider is available."""
+
+    def test_no_provider_returns_fallback(self):
+        """Should return fallback message when no provider is available."""
+        with patch(
+            "mtg_deck_maker.advisor.llm_provider.get_provider",
+            return_value=None,
+        ):
             result = get_deck_advice(DeckAnalysis(), "Help!", api_key=None)
         assert "ANTHROPIC_API_KEY" in result
 
-    def test_env_api_key_used(self):
-        """Should use ANTHROPIC_API_KEY from environment."""
-        mock_content = MagicMock()
-        mock_content.text = "Use more removal spells."
-
-        mock_message = MagicMock()
-        mock_message.content = [mock_content]
-
-        mock_client = MagicMock()
-        mock_client.messages.create.return_value = mock_message
-
-        mock_anthropic = MagicMock()
-        mock_anthropic.Anthropic.return_value = mock_client
-
-        with (
-            patch.dict("os.environ", {"ANTHROPIC_API_KEY": "env-key"}),
-            patch(
-                "mtg_deck_maker.advisor.llm_advisor._anthropic_module",
-                mock_anthropic,
-            ),
-        ):
-            result = get_deck_advice(
-                DeckAnalysis(), "What removal should I add?"
-            )
-
-        assert result == "Use more removal spells."
-        mock_anthropic.Anthropic.assert_called_once_with(api_key="env-key")
-
-    def test_explicit_api_key(self):
-        """Should use the explicitly provided API key."""
-        mock_content = MagicMock()
-        mock_content.text = "Good deck!"
-
-        mock_message = MagicMock()
-        mock_message.content = [mock_content]
-
-        mock_client = MagicMock()
-        mock_client.messages.create.return_value = mock_message
-
-        mock_anthropic = MagicMock()
-        mock_anthropic.Anthropic.return_value = mock_client
-
+    def test_explicit_api_key_ignored_without_provider(self):
+        """api_key param is ignored; only the provider abstraction matters."""
         with patch(
-            "mtg_deck_maker.advisor.llm_advisor._anthropic_module",
-            mock_anthropic,
+            "mtg_deck_maker.advisor.llm_provider.get_provider",
+            return_value=None,
         ):
             result = get_deck_advice(
-                DeckAnalysis(), "Rate my deck", api_key="explicit-key"
+                DeckAnalysis(), "Help", api_key="explicit-key"
             )
-
-        assert result == "Good deck!"
-        mock_anthropic.Anthropic.assert_called_once_with(
-            api_key="explicit-key"
-        )
-
-    def test_rate_limit_handling(self):
-        """Should handle rate limit errors gracefully."""
-        mock_anthropic = MagicMock()
-        mock_client = MagicMock()
-        mock_client.messages.create.side_effect = Exception(
-            "Error code: 429 rate_limit_exceeded"
-        )
-        mock_anthropic.Anthropic.return_value = mock_client
-
-        with patch(
-            "mtg_deck_maker.advisor.llm_advisor._anthropic_module",
-            mock_anthropic,
-        ):
-            result = get_deck_advice(
-                DeckAnalysis(), "Help", api_key="test-key"
-            )
-
-        assert "rate limit" in result.lower()
-
-    def test_generic_error_handling(self):
-        """Should handle generic API errors gracefully."""
-        mock_anthropic = MagicMock()
-        mock_client = MagicMock()
-        mock_client.messages.create.side_effect = Exception(
-            "Connection refused"
-        )
-        mock_anthropic.Anthropic.return_value = mock_client
-
-        with patch(
-            "mtg_deck_maker.advisor.llm_advisor._anthropic_module",
-            mock_anthropic,
-        ):
-            result = get_deck_advice(
-                DeckAnalysis(), "Help", api_key="test-key"
-            )
-
-        assert "Failed to get LLM advice" in result
-        assert "Connection refused" in result
-
-    def test_empty_response_handling(self):
-        """Should handle empty API response."""
-        mock_anthropic = MagicMock()
-        mock_message = MagicMock()
-        mock_message.content = []
-
-        mock_client = MagicMock()
-        mock_client.messages.create.return_value = mock_message
-        mock_anthropic.Anthropic.return_value = mock_client
-
-        with patch(
-            "mtg_deck_maker.advisor.llm_advisor._anthropic_module",
-            mock_anthropic,
-        ):
-            result = get_deck_advice(
-                DeckAnalysis(), "Help", api_key="test-key"
-            )
-
-        assert "no response" in result.lower()
-
-    def test_anthropic_not_installed(self):
-        """Should handle missing anthropic package."""
-        with patch(
-            "mtg_deck_maker.advisor.llm_advisor._anthropic_module",
-            None,
-        ):
-            result = get_deck_advice(
-                DeckAnalysis(), "Help", api_key="test-key"
-            )
-
-        assert "anthropic" in result.lower()
+        assert "ANTHROPIC_API_KEY" in result

@@ -1,13 +1,16 @@
+import { Suspense, lazy } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter, Routes, Route } from 'react-router';
 import Layout from './components/layout/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
-import HomePage from './pages/HomePage';
-import BuildPage from './pages/BuildPage';
-import DeckViewPage from './pages/DeckViewPage';
-import ResearchPage from './pages/ResearchPage';
-import SearchPage from './pages/SearchPage';
-import SettingsPage from './pages/SettingsPage';
+
+// Lazy-load page components for code splitting
+const HomePage = lazy(() => import('./pages/HomePage'));
+const BuildPage = lazy(() => import('./pages/BuildPage'));
+const DeckViewPage = lazy(() => import('./pages/DeckViewPage'));
+const ResearchPage = lazy(() => import('./pages/ResearchPage'));
+const SearchPage = lazy(() => import('./pages/SearchPage'));
+const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -18,18 +21,14 @@ const queryClient = new QueryClient({
   },
 });
 
-/**
- * Root application component.
- * Provides QueryClient, routing, and a top-level error boundary.
- *
- * Routes:
- *   /              → HomePage
- *   /build         → BuildPage
- *   /deck/:deckId  → DeckViewPage
- *   /research      → ResearchPage
- *   /search        → SearchPage
- *   /settings      → SettingsPage
- */
+function PageLoading() {
+  return (
+    <div className="flex min-h-[50vh] items-center justify-center" aria-busy="true">
+      <div className="h-8 w-8 animate-spin rounded-full border-4 border-[var(--color-border)] border-t-[var(--color-accent)]" />
+    </div>
+  );
+}
+
 export default function App() {
   return (
     <ErrorBoundary>
@@ -41,7 +40,9 @@ export default function App() {
                 index
                 element={
                   <ErrorBoundary>
-                    <HomePage />
+                    <Suspense fallback={<PageLoading />}>
+                      <HomePage />
+                    </Suspense>
                   </ErrorBoundary>
                 }
               />
@@ -49,7 +50,9 @@ export default function App() {
                 path="build"
                 element={
                   <ErrorBoundary>
-                    <BuildPage />
+                    <Suspense fallback={<PageLoading />}>
+                      <BuildPage />
+                    </Suspense>
                   </ErrorBoundary>
                 }
               />
@@ -57,7 +60,9 @@ export default function App() {
                 path="deck/:deckId"
                 element={
                   <ErrorBoundary>
-                    <DeckViewPage />
+                    <Suspense fallback={<PageLoading />}>
+                      <DeckViewPage />
+                    </Suspense>
                   </ErrorBoundary>
                 }
               />
@@ -65,7 +70,9 @@ export default function App() {
                 path="research"
                 element={
                   <ErrorBoundary>
-                    <ResearchPage />
+                    <Suspense fallback={<PageLoading />}>
+                      <ResearchPage />
+                    </Suspense>
                   </ErrorBoundary>
                 }
               />
@@ -73,7 +80,9 @@ export default function App() {
                 path="search"
                 element={
                   <ErrorBoundary>
-                    <SearchPage />
+                    <Suspense fallback={<PageLoading />}>
+                      <SearchPage />
+                    </Suspense>
                   </ErrorBoundary>
                 }
               />
@@ -81,7 +90,9 @@ export default function App() {
                 path="settings"
                 element={
                   <ErrorBoundary>
-                    <SettingsPage />
+                    <Suspense fallback={<PageLoading />}>
+                      <SettingsPage />
+                    </Suspense>
                   </ErrorBoundary>
                 }
               />

@@ -47,34 +47,32 @@ src/mtg_deck_maker/
 | P1 Algorithm | Curve shaping, regex expansion (28 patterns), win conditions (20 patterns), redundancy awareness | Done |
 | Frontend | React 19 + Vite scaffolded, FastAPI web routers | In Progress |
 
-**Tests:** 870 passing, zero failures
-
-**CRITICAL:** All work since initial commit is uncommitted (dozens of files).
+**Tests:** 765 passing, zero failures (1.87s full suite)
 
 ---
 
 ## Next Steps (Priority Order)
 
-### Priority 0: Stabilize
+### Priority 0: Stabilize — DONE
 
-- [ ] Commit all uncommitted work (dozens of modified + untracked files)
-- [ ] Remove dead code: legacy Anthropic path (`_get_advice_legacy()` in llm_advisor.py), unused `_assign_card_prices()`
-- [ ] ~~Delete stale plan files~~ (done — PHASE2_IMPLEMENTATION.md, Phase2.5.md removed)
+- [x] Commit all uncommitted work (19 atomic commits pushed)
+- [x] Remove dead code: legacy Anthropic path (`_get_advice_legacy()`), unused `_assign_card_prices()`
+- [x] Delete stale plan files (PHASE2_IMPLEMENTATION.md, Phase2.5.md removed)
+- [x] Consolidate and trim test suite (870 → 765 tests, 3500 lines removed)
+- [x] Fix hanging sync tests (unmocked `fetch_combos()` making real HTTP calls)
 
-### Priority 1: Performance Fixes
+### Priority 1: Performance Fixes — DONE
 
-Addresses architectural concerns AC-1 through AC-4 from [ADR.md](./ADR.md).
+- [x] **AC-2: Bulk price loading** — Added `get_cheapest_prices()` batch query with chunked IN clause (900/chunk)
+- [x] **AC-3: SQL-level color identity filtering** — Rewrote with NOT LIKE exclusion patterns in SQL
+- [x] **AC-1: Extract build orchestration** — Added `BuildService.build_from_db()`, CLI and API are thin wrappers
+- [ ] **AC-4: Fix SSE streaming** — In progress: queue bridge between sync thread and async SSE generator
 
-- [ ] **AC-2: Bulk price loading** — Add `get_cheapest_prices(card_ids: list[int])` batch query to printing_repo. Single SQL query with GROUP BY instead of 20,000+ individual lookups.
-- [ ] **AC-3: SQL-level color identity filtering** — Pre-filter cards by color identity in SQL using indexed column, refine in Python only for edge cases (hybrid mana, colorless).
-- [ ] **AC-4: Fix SSE streaming** — Use `queue.Queue` bridge between sync service thread and async SSE generator for real-time progress events.
-- [ ] **AC-1: Extract build orchestration** — Consolidate duplicated build flow from `cli.py` and `decks.py` router into `BuildService`. CLI and API both call the same service method.
+### Priority 2: Code Quality — In Progress
 
-### Priority 2: Code Quality
-
-- [ ] **AC-5: ScoredCandidate dataclass** — Replace untyped dict threading through engine with a `ScoredCandidate` dataclass (card, score, categories, combo_bonus, priority_bonus).
-- [ ] **AC-6: Standardize API clients** — Migrate EDHREC and CommanderSpellbook clients from `urllib.request` to `httpx` for consistency and async support.
-- [ ] **AC-7: Remove dead code** — Legacy Anthropic path, unused functions, stale imports.
+- [ ] **AC-5: ScoredCandidate dataclass** — In progress: replacing untyped dicts with typed dataclass
+- [ ] **AC-6: Standardize API clients** — In progress: migrating EDHREC/CommanderSpellbook from urllib to httpx
+- [x] **AC-7: Remove dead code** — Done (part of P0 stabilization)
 
 ### Priority 3: Measurement Infrastructure
 

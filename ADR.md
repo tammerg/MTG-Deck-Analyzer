@@ -92,13 +92,13 @@ These are known issues tracked for resolution. See PLAN.md for prioritized fix s
 
 | ID | Concern | Severity | Details |
 |----|---------|----------|---------|
-| AC-1 | CLI/API orchestration duplication | Medium | The deck build flow is duplicated between `cli.py` and the `decks.py` FastAPI router. Both independently orchestrate sync → load commander → build → validate → export instead of sharing `BuildService`. |
-| AC-2 | N+1 query explosion in web API | High | The web API issues ~20,000+ individual price queries per deck build (one per card printing). No batch price loading exists. |
-| AC-3 | Full table scan for color identity | High | Color identity filtering loads all ~30,000 cards into Python and filters in-memory. Should use SQL pre-filtering. |
+| AC-1 | ~~CLI/API orchestration duplication~~ | ~~Medium~~ | **RESOLVED.** Extracted `BuildService.build_from_db()` — CLI and API are thin wrappers. |
+| AC-2 | ~~N+1 query explosion in web API~~ | ~~High~~ | **RESOLVED.** Added `get_cheapest_prices()` batch query with chunked IN clause (900/chunk). |
+| AC-3 | ~~Full table scan for color identity~~ | ~~High~~ | **RESOLVED.** SQL-level NOT LIKE exclusion filtering, no Python-side full scan. |
 | AC-4 | SSE streaming broken | Medium | Server-Sent Events for sync progress buffer all events until the sync completes, defeating the purpose of streaming. The sync runs synchronously in the main thread. |
 | AC-5 | Untyped dict threading for scored candidates | Low | Scored candidates are passed through the engine as plain dicts (`{"card": ..., "score": ..., "categories": ...}`) instead of typed dataclasses. |
 | AC-6 | Mixed sync/async in API clients | Low | EDHREC and CommanderSpellbook clients use `urllib.request` (sync) while the web API uses `httpx` (async). Inconsistent and blocks the event loop when called from async context. |
-| AC-7 | Dead code | Low | Legacy Anthropic path in `llm_advisor.py` (`_get_advice_legacy()`), unused `_assign_card_prices()` function. |
+| AC-7 | ~~Dead code~~ | ~~Low~~ | **RESOLVED.** Removed legacy Anthropic path, unused `_assign_card_prices()`, stale imports. |
 
 ---
 

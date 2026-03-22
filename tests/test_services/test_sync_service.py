@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
+from unittest.mock import AsyncMock, patch
 
 from mtg_deck_maker.db.database import Database
 from mtg_deck_maker.services.sync_service import (
@@ -435,9 +433,10 @@ class TestProcessCards:
 
 
 class TestSyncServiceFullSync:
+    @patch("mtg_deck_maker.services.sync_service.fetch_combos", new_callable=AsyncMock, return_value=[])
     @patch("mtg_deck_maker.services.sync_service.SyncService._download_bulk_json")
     @patch("mtg_deck_maker.services.sync_service.ScryfallClient")
-    def test_full_sync_succeeds(self, mock_scryfall_cls, mock_download, tmp_path):
+    def test_full_sync_succeeds(self, mock_scryfall_cls, mock_download, _mock_combos, tmp_path):
         db_path = tmp_path / "test.db"
 
         # Mock ScryfallClient
@@ -462,10 +461,11 @@ class TestSyncServiceFullSync:
         assert result.prices_added > 0
         assert result.duration_seconds > 0
 
+    @patch("mtg_deck_maker.services.sync_service.fetch_combos", new_callable=AsyncMock, return_value=[])
     @patch("mtg_deck_maker.services.sync_service.SyncService._download_bulk_json")
     @patch("mtg_deck_maker.services.sync_service.ScryfallClient")
     def test_full_sync_with_progress_callback(
-        self, mock_scryfall_cls, mock_download, tmp_path
+        self, mock_scryfall_cls, mock_download, _mock_combos, tmp_path
     ):
         db_path = tmp_path / "test.db"
 

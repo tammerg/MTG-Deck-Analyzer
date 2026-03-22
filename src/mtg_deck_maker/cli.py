@@ -819,19 +819,39 @@ def search(query: str, color: str | None, card_type: str | None, limit: int) -> 
 
 
 @cli.command()
-@click.option("--host", default="127.0.0.1", help="Bind host.")
-@click.option("--port", default=8000, type=int, help="Bind port.")
-@click.option("--reload", is_flag=True, default=False, help="Enable auto-reload.")
-def serve(host: str, port: int, reload: bool) -> None:
-    """Start the web API server."""
-    import uvicorn
+@click.option("--host", default="127.0.0.1", help="Bind host address.")
+@click.option("--port", type=int, default=8000, help="Bind port.")
+@click.option(
+    "--reload",
+    "auto_reload",
+    is_flag=True,
+    default=False,
+    help="Enable auto-reload for development.",
+)
+def serve(host: str, port: int, auto_reload: bool) -> None:
+    """Start the web API server.
+
+    Launches the FastAPI application on the specified host and port.
+    Use --reload for development (auto-restarts on code changes).
+    """
+    try:
+        import uvicorn
+    except ImportError:
+        click.echo(
+            "Error: uvicorn is required. Install it with: pip install uvicorn[standard]",
+            err=True,
+        )
+        sys.exit(1)
+
+    click.echo(f"Starting MTG Deck Maker API on http://{host}:{port}")
+    click.echo("Press Ctrl+C to stop.")
 
     uvicorn.run(
         "mtg_deck_maker.api.web.app:create_app",
-        factory=True,
         host=host,
         port=port,
-        reload=reload,
+        reload=auto_reload,
+        factory=True,
     )
 
 

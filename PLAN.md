@@ -47,7 +47,7 @@ src/mtg_deck_maker/
 | P1 Algorithm | Curve shaping, regex expansion (28 patterns), win conditions (20 patterns), redundancy awareness | Done |
 | Frontend | React 19 + Vite scaffolded, FastAPI web routers | In Progress |
 
-**Tests:** 875 passing, zero failures (1.93s full suite)
+**Tests:** 942 passing, zero failures (1.97s full suite)
 
 ---
 
@@ -85,14 +85,14 @@ Build the tooling needed to validate algorithm changes. See [ALGORITHM_ROADMAP.m
 - [x] `DeckComparison` tool — `metrics/comparison.py` (19 tests)
 - [x] Benchmark suite — `metrics/benchmark.py`, 8 reference commanders with validation thresholds (21 tests)
 
-### Priority 4: Algorithm Improvements (P2)
+### Priority 4: Algorithm Improvements (P2) — DONE
 
-Open items from [ALGORITHM_ROADMAP.md](./ALGORITHM_ROADMAP.md):
+All items from [ALGORITHM_ROADMAP.md](./ALGORITHM_ROADMAP.md) P2 tier:
 
-- [ ] **W2c: Pairwise synergy** — Compute card-to-card synergy for top N candidates, detect "packages" of cards that work together
-- [ ] **W7: Deck-internal synergy audit** — Post-build optimization pass: compute pairwise synergy for all 100 cards, swap low-synergy outliers
-- [ ] **W1b: LLM-assisted categorization** — Batch uncategorized cards through LLM for JSON categorization, cache in DB
-- [ ] **W4b: LLM-suggested category ratios** — Add `category_targets` to research JSON schema, let LLM recommend ratios per commander
+- [x] **W2c: Pairwise synergy** — `compute_pairwise_synergy()`, `compute_package_score()`, `find_synergy_packages()` in synergy.py (21 tests)
+- [x] **W7: Deck-internal synergy audit** — `audit_synergy()` in synergy_audit.py: pairwise audit, outlier detection, swap suggestions (11 tests)
+- [x] **W1b: LLM-assisted categorization** — `LLMCategorizer` in advisor/llm_categorizer.py: batched LLM categorization with validation (25 tests)
+- [x] **W4b: LLM-suggested category ratios** — `category_targets` in ResearchResult, LLM prompt extended (13 tests)
 
 ### Priority 5: Frontend Implementation
 

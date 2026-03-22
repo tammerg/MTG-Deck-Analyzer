@@ -132,10 +132,10 @@ Only matches "you win the game" and "each opponent loses". Misses:
 | W1a | Expand regex patterns | Medium | Low | **P1** | **DONE** — 28 new patterns: treasure/food ramp, impulsive draw, scry/surveil/connive, fight/bounce/sacrifice removal, ward/phase out protection, mass bounce/damage wipes |
 | W8 | Narrow win conditions | Medium | Low | **P1** | **DONE** — 20 new patterns: infect/toxic/poison, extra combat, mill, damage to each opponent, double strike, power doubling + infect theme in synergy.py |
 | W6 | No redundancy awareness | Medium | Low | **P1** | **DONE** — compute_diminishing_penalty() + compute_functional_similarity() (Jaccard) + compute_duplicate_penalty() in budget_optimizer |
-| W2c | Pairwise synergy | High | High | **P2** | Open |
-| W7 | Deck-internal synergy | High | High | **P2** | Open |
-| W1b | LLM-assisted categorization | High | Medium | **P2** | Open |
-| W4b | LLM-suggested category ratios | Medium | Low | **P2** | Open |
+| W2c | Pairwise synergy | High | High | **P2** | **DONE** — compute_pairwise_synergy() + compute_package_score() + find_synergy_packages() in synergy.py |
+| W7 | Deck-internal synergy | High | High | **P2** | **DONE** — audit_synergy() in synergy_audit.py: pairwise audit, outlier detection, swap suggestions |
+| W1b | LLM-assisted categorization | High | Medium | **P2** | **DONE** — LLMCategorizer in advisor/llm_categorizer.py: batched LLM categorization with parsing + validation |
+| W4b | LLM-suggested category ratios | Medium | Low | **P2** | **DONE** — category_targets field in ResearchResult, LLM prompt extended, validated parsing |
 | W3b | Trained scoring model | Very High | Very High | **P3** | Open |
 | W2d | LLM synergy matrix | High | Medium | **P3** | Open |
 

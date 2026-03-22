@@ -9,8 +9,11 @@ from mtg_deck_maker.engine.synergy import (
     _compute_tribal_synergy,
     _extract_creature_types,
     compute_combo_synergy,
+    compute_package_score,
+    compute_pairwise_synergy,
     compute_synergy,
     extract_themes,
+    find_synergy_packages,
     score_theme_match,
 )
 
@@ -311,3 +314,344 @@ class TestComboSynergy:
         )
         assert score >= 0.3
         assert score <= 0.5
+
+
+# === Pairwise Synergy ===
+
+
+
+class TestComputePairwiseSynergy:
+    def test_keyword_overlap_component(self):
+        """Two cards sharing 'sacrifice' keyword should have nonzero synergy."""
+        card_a = _make_card(
+            "Viscera Seer",
+            type_line="Creature \u2014 Vampire Wizard",
+            oracle_text="Sacrifice a creature: Scry 1.",
+            color_identity=["B"],
+        )
+        card_b = _make_card(
+            "Carrion Feeder",
+            type_line="Creature \u2014 Zombie",
+            oracle_text="Sacrifice a creature: Put a +1/+1 counter on Carrion Feeder.",
+            color_identity=["B"],
+        )
+        score = compute_pairwise_synergy(card_a, card_b)
+        assert score > 0.0
+
+    def test_theme_co_support(self):
+        """Two cards both matching 'tokens' theme should score well."""
+        card_a = _make_card(
+            "Secure the Wastes",
+            type_line="Instant",
+            oracle_text="Create X 1/1 white Warrior creature tokens.",
+            color_identity=["W"],
+        )
+        card_b = _make_card(
+            "Anointed Procession",
+            type_line="Enchantment",
+            oracle_text="If an effect would create one or more tokens under your control, it creates twice that many of those tokens instead.",
+            color_identity=["W"],
+        )
+        score = compute_pairwise_synergy(card_a, card_b)
+        assert score > 0.0
+
+    def test_tribal_match_same_type(self):
+        """Two Goblins should have tribal synergy."""
+        card_a = _make_card(
+            "Goblin Warchief",
+            type_line="Creature \u2014 Goblin Warrior",
+            oracle_text="Goblin spells you cast cost {1} less to cast. Goblins you control have haste.",
+            color_identity=["R"],
+        )
+        card_b = _make_card(
+            "Goblin Chieftain",
+            type_line="Creature \u2014 Goblin",
+            oracle_text="Haste\nOther Goblins you control get +1/+1 and have haste.",
+            color_identity=["R"],
+        )
+        score = compute_pairwise_synergy(card_a, card_b)
+        assert score > 0.0
+
+    def test_tribal_match_different_type(self):
+        """Goblin vs Elf should have no tribal synergy component."""
+        card_a = _make_card(
+            "Goblin Warchief",
+            type_line="Creature \u2014 Goblin Warrior",
+            oracle_text="Goblin spells you cast cost {1} less.",
+            color_identity=["R"],
+        )
+        card_b = _make_card(
+            "Llanowar Elves",
+            type_line="Creature \u2014 Elf Druid",
+            oracle_text="{T}: Add {G}.",
+            color_identity=["G"],
+        )
+        # Tribal component is 0, but other components might contribute
+        score_same = compute_pairwise_synergy(card_a, _make_card(
+            "Goblin Chieftain",
+            type_line="Creature \u2014 Goblin",
+            oracle_text="Other Goblins you control get +1/+1.",
+            color_identity=["R"],
+        ))
+        score_diff = compute_pairwise_synergy(card_a, card_b)
+        assert score_same > score_diff
+
+    def test_enabler_payoff_sacrifice_death(self):
+        """Sacrifice outlet + death trigger should score on enabler/payoff."""
+        sac_outlet = _make_card(
+            "Ashnod's Altar",
+            type_line="Artifact",
+            oracle_text="Sacrifice a creature: Add {C}{C}.",
+        )
+        death_trigger = _make_card(
+            "Blood Artist",
+            type_line="Creature \u2014 Vampire",
+            oracle_text="Whenever Blood Artist or another creature dies, target player loses 1 life and you gain 1 life.",
+            color_identity=["B"],
+        )
+        score = compute_pairwise_synergy(sac_outlet, death_trigger)
+        assert score > 0.0
+
+    def test_enabler_payoff_tokens_etb(self):
+        """Token creator + creature ETB payoff should score on enabler/payoff."""
+        token_maker = _make_card(
+            "Krenko, Mob Boss",
+            type_line="Legendary Creature \u2014 Goblin Warrior",
+            oracle_text="Tap: Create X 1/1 red Goblin creature tokens.",
+            color_identity=["R"],
+        )
+        etb_payoff = _make_card(
+            "Impact Tremors",
+            type_line="Enchantment",
+            oracle_text="Whenever a creature enters the battlefield under your control, Impact Tremors deals 1 damage to each opponent.",
+            color_identity=["R"],
+        )
+        score = compute_pairwise_synergy(token_maker, etb_payoff)
+        assert score > 0.0
+
+    def test_no_synergy_unrelated_cards(self):
+        """Two completely unrelated cards should score very low."""
+        card_a = _make_card(
+            "Lightning Bolt",
+            type_line="Instant",
+            oracle_text="Lightning Bolt deals 3 damage to any target.",
+            color_identity=["R"],
+        )
+        card_b = _make_card(
+            "Llanowar Elves",
+            type_line="Creature \u2014 Elf Druid",
+            oracle_text="{T}: Add {G}.",
+            color_identity=["G"],
+        )
+        score = compute_pairwise_synergy(card_a, card_b)
+        assert score < 0.15
+
+    def test_score_in_range(self):
+        """Score must be between 0.0 and 1.0 inclusive."""
+        card_a = _make_card(
+            "Sol Ring",
+            type_line="Artifact",
+            oracle_text="{T}: Add {C}{C}.",
+        )
+        card_b = _make_card(
+            "Arcane Signet",
+            type_line="Artifact",
+            oracle_text="{T}: Add one mana of any color in your commander's color identity.",
+        )
+        score = compute_pairwise_synergy(card_a, card_b)
+        assert 0.0 <= score <= 1.0
+
+    def test_enabler_payoff_draw(self):
+        """Card draw enabler + draw payoff should score on enabler/payoff."""
+        draw_enabler = _make_card(
+            "Rhystic Study",
+            type_line="Enchantment",
+            oracle_text="Whenever an opponent casts a spell, you may draw a card unless that player pays {1}.",
+            color_identity=["U"],
+        )
+        draw_payoff = _make_card(
+            "Psychosis Crawler",
+            type_line="Artifact Creature \u2014 Horror",
+            oracle_text="Psychosis Crawler's power and toughness are each equal to the number of cards in your hand.\nWhenever you draw a card, each opponent loses 1 life.",
+            color_identity=[],
+        )
+        score = compute_pairwise_synergy(draw_enabler, draw_payoff)
+        assert score > 0.0
+
+    def test_enabler_payoff_counters_proliferate(self):
+        """+1/+1 counter source + proliferate should score on enabler/payoff."""
+        counter_source = _make_card(
+            "Hardened Scales",
+            type_line="Enchantment",
+            oracle_text="If one or more +1/+1 counters would be placed on a creature you control, that many plus one +1/+1 counters are placed on it instead.",
+            color_identity=["G"],
+        )
+        proliferator = _make_card(
+            "Flux Channeler",
+            type_line="Creature \u2014 Human Wizard",
+            oracle_text="Whenever you cast a noncreature spell, proliferate.",
+            color_identity=["U"],
+        )
+        score = compute_pairwise_synergy(counter_source, proliferator)
+        assert score > 0.0
+
+    def test_enabler_payoff_graveyard(self):
+        """Graveyard filler + graveyard retriever should score on enabler/payoff."""
+        graveyard_filler = _make_card(
+            "Stitcher's Supplier",
+            type_line="Creature \u2014 Zombie",
+            oracle_text="When Stitcher's Supplier enters the battlefield or dies, mill three cards.",
+            color_identity=["B"],
+        )
+        graveyard_retriever = _make_card(
+            "Reanimate",
+            type_line="Sorcery",
+            oracle_text="Put target creature card from a graveyard onto the battlefield under your control. You lose life equal to its mana value.",
+            color_identity=["B"],
+        )
+        score = compute_pairwise_synergy(graveyard_filler, graveyard_retriever)
+        assert score > 0.0
+
+
+class TestComputePackageScore:
+    def test_zero_cards(self):
+        """Empty list should return 0.0."""
+        assert compute_package_score([]) == 0.0
+
+    def test_one_card(self):
+        """Single card should return 0.0."""
+        card = _make_card("Sol Ring", oracle_text="{T}: Add {C}{C}.")
+        assert compute_package_score([card]) == 0.0
+
+    def test_two_cards(self):
+        """Two cards should return the pairwise score."""
+        card_a = _make_card(
+            "Ashnod's Altar",
+            type_line="Artifact",
+            oracle_text="Sacrifice a creature: Add {C}{C}.",
+        )
+        card_b = _make_card(
+            "Blood Artist",
+            type_line="Creature \u2014 Vampire",
+            oracle_text="Whenever Blood Artist or another creature dies, target player loses 1 life and you gain 1 life.",
+            color_identity=["B"],
+        )
+        score = compute_package_score([card_a, card_b])
+        expected = compute_pairwise_synergy(card_a, card_b)
+        assert score == pytest.approx(expected)
+
+    def test_three_cards(self):
+        """Three cards should return the mean of all three pairwise scores."""
+        card_a = _make_card(
+            "Ashnod's Altar",
+            type_line="Artifact",
+            oracle_text="Sacrifice a creature: Add {C}{C}.",
+        )
+        card_b = _make_card(
+            "Blood Artist",
+            type_line="Creature \u2014 Vampire",
+            oracle_text="Whenever Blood Artist or another creature dies, target player loses 1 life.",
+            color_identity=["B"],
+        )
+        card_c = _make_card(
+            "Reassembling Skeleton",
+            type_line="Creature \u2014 Skeleton Warrior",
+            oracle_text="{1}{B}: Return Reassembling Skeleton from your graveyard to the battlefield tapped.",
+            color_identity=["B"],
+        )
+        score = compute_package_score([card_a, card_b, card_c])
+        pair_ab = compute_pairwise_synergy(card_a, card_b)
+        pair_ac = compute_pairwise_synergy(card_a, card_c)
+        pair_bc = compute_pairwise_synergy(card_b, card_c)
+        expected = (pair_ab + pair_ac + pair_bc) / 3
+        assert score == pytest.approx(expected)
+
+
+class TestFindSynergyPackages:
+    def test_empty_list(self):
+        """Empty candidate list should return empty results."""
+        assert find_synergy_packages([]) == []
+
+    def test_single_card(self):
+        """Single card should return empty results."""
+        card = _make_card("Sol Ring", oracle_text="{T}: Add {C}{C}.")
+        assert find_synergy_packages([card]) == []
+
+    def test_returns_sorted_above_threshold(self):
+        """Results should be sorted descending by score, all above min_synergy."""
+        sac_outlet = _make_card(
+            "Ashnod's Altar",
+            type_line="Artifact",
+            oracle_text="Sacrifice a creature: Add {C}{C}.",
+        )
+        death_trigger = _make_card(
+            "Blood Artist",
+            type_line="Creature \u2014 Vampire",
+            oracle_text="Whenever Blood Artist or another creature dies, target player loses 1 life.",
+            color_identity=["B"],
+        )
+        unrelated = _make_card(
+            "Lightning Bolt",
+            type_line="Instant",
+            oracle_text="Lightning Bolt deals 3 damage to any target.",
+            color_identity=["R"],
+        )
+        results = find_synergy_packages(
+            [sac_outlet, death_trigger, unrelated], min_synergy=0.1
+        )
+        # All results should be above threshold
+        for _, _, score in results:
+            assert score >= 0.1
+        # Results should be sorted descending
+        scores = [s for _, _, s in results]
+        assert scores == sorted(scores, reverse=True)
+
+    def test_respects_min_synergy(self):
+        """Pairs below min_synergy should be excluded."""
+        card_a = _make_card(
+            "Lightning Bolt",
+            type_line="Instant",
+            oracle_text="Lightning Bolt deals 3 damage to any target.",
+            color_identity=["R"],
+        )
+        card_b = _make_card(
+            "Llanowar Elves",
+            type_line="Creature \u2014 Elf Druid",
+            oracle_text="{T}: Add {G}.",
+            color_identity=["G"],
+        )
+        # Very high threshold should exclude unrelated cards
+        results = find_synergy_packages([card_a, card_b], min_synergy=0.9)
+        assert results == []
+
+    def test_respects_top_n(self):
+        """Only the first top_n candidates should be considered."""
+        cards = [
+            _make_card(f"Card {i}", oracle_text=f"Text {i}")
+            for i in range(10)
+        ]
+        # top_n=2 means only 1 pair (cards[0], cards[1])
+        results = find_synergy_packages(cards, top_n=2, min_synergy=0.0)
+        # Should have at most 1 pair
+        assert len(results) <= 1
+
+    def test_result_tuple_format(self):
+        """Each result should be a (name_a, name_b, score) tuple."""
+        card_a = _make_card(
+            "Ashnod's Altar",
+            type_line="Artifact",
+            oracle_text="Sacrifice a creature: Add {C}{C}.",
+        )
+        card_b = _make_card(
+            "Blood Artist",
+            type_line="Creature \u2014 Vampire",
+            oracle_text="Whenever Blood Artist or another creature dies, target player loses 1 life.",
+            color_identity=["B"],
+        )
+        results = find_synergy_packages([card_a, card_b], min_synergy=0.0)
+        assert len(results) == 1
+        name_a, name_b, score = results[0]
+        assert isinstance(name_a, str)
+        assert isinstance(name_b, str)
+        assert isinstance(score, float)
+        assert 0.0 <= score <= 1.0

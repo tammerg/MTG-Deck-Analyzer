@@ -395,3 +395,210 @@ def compute_combo_synergy(
 
     # Partners exist but are not yet in the deck -- moderate bonus
     return 0.4
+
+
+# Enabler/payoff pattern pairs for pairwise synergy detection.
+# Each tuple is (enabler_pattern, payoff_pattern); if card A matches the
+# enabler and card B matches the payoff (or vice-versa), the pair scores.
+_ENABLER_PAYOFF_PAIRS: list[tuple[re.Pattern[str], re.Pattern[str]]] = [
+    (re.compile(r"sacrifice a", re.I), re.compile(r"whenever.*dies", re.I)),
+    (
+        re.compile(r"create.*token", re.I),
+        re.compile(r"for each.*creature|whenever.*creature.*enters", re.I),
+    ),
+    (
+        re.compile(r"draw.*card|cards", re.I),
+        re.compile(r"whenever you draw|no maximum hand size", re.I),
+    ),
+    (
+        re.compile(r"graveyard", re.I),
+        re.compile(r"from.*graveyard|whenever.*put into.*graveyard", re.I),
+    ),
+    (
+        re.compile(r"\+1/\+1 counter", re.I),
+        re.compile(r"proliferate|for each.*counter", re.I),
+    ),
+]
+
+
+def _compute_enabler_payoff(card_a: Card, card_b: Card) -> float:
+    """Score enabler/payoff relationship between two cards.
+
+    Checks whether one card provides an enabler effect and the other
+    provides a corresponding payoff effect. The relationship is checked
+    in both directions (A enables B, or B enables A).
+
+    Args:
+        card_a: First card.
+        card_b: Second card.
+
+    Returns:
+        1.0 if at least one enabler/payoff pair matches, 0.0 otherwise.
+    """
+    text_a = card_a.oracle_text or ""
+    text_b = card_b.oracle_text or ""
+    if not text_a or not text_b:
+        return 0.0
+
+    for enabler_pat, payoff_pat in _ENABLER_PAYOFF_PAIRS:
+        # A is enabler, B is payoff
+        if enabler_pat.search(text_a) and payoff_pat.search(text_b):
+            return 1.0
+        # B is enabler, A is payoff
+        if enabler_pat.search(text_b) and payoff_pat.search(text_a):
+            return 1.0
+
+    return 0.0
+
+
+def _compute_pairwise_theme_co_support(card_a: Card, card_b: Card) -> float:
+    """Score how many themes both cards co-support.
+
+    Checks each theme in ``_THEME_PATTERNS`` and counts how many themes
+    both cards match. Returns a normalized score (0.0-1.0).
+
+    Args:
+        card_a: First card.
+        card_b: Second card.
+
+    Returns:
+        Proportion of themes both cards match out of total themes.
+    """
+    text_a = card_a.oracle_text or ""
+    text_b = card_b.oracle_text or ""
+    if not text_a or not text_b:
+        return 0.0
+
+    shared_themes = 0
+    total_themes = len(_THEME_PATTERNS)
+
+    for _theme_name, patterns in _THEME_PATTERNS.items():
+        a_matches = any(pat.search(text_a) for pat, _w in patterns)
+        b_matches = any(pat.search(text_b) for pat, _w in patterns)
+        if a_matches and b_matches:
+            shared_themes += 1
+
+    if shared_themes == 0:
+        return 0.0
+
+    # Normalize: 1 shared theme out of ~11 is still meaningful, so scale up
+    return min(1.0, shared_themes / max(total_themes * 0.3, 1.0))
+
+
+def _compute_pairwise_tribal(card_a: Card, card_b: Card) -> float:
+    """Score tribal overlap between two cards.
+
+    Args:
+        card_a: First card.
+        card_b: Second card.
+
+    Returns:
+        1.0 if any creature types are shared, 0.0 otherwise.
+    """
+    types_a = _extract_creature_types(card_a)
+    types_b = _extract_creature_types(card_b)
+    if not types_a or not types_b:
+        return 0.0
+    return 1.0 if types_a.intersection(types_b) else 0.0
+
+
+def compute_pairwise_synergy(card_a: Card, card_b: Card) -> float:
+    """Compute pairwise synergy score between two cards.
+
+    Evaluates how well two cards work together independent of any
+    commander, based on keyword overlap, shared theme support,
+    tribal overlap, and enabler/payoff relationships.
+
+    Args:
+        card_a: First card.
+        card_b: Second card.
+
+    Returns:
+        Float score from 0.0 to 1.0 representing card-to-card synergy.
+    """
+    keyword_weight = 0.30
+    theme_weight = 0.40
+    tribal_weight = 0.15
+    enabler_weight = 0.15
+
+    # Keyword overlap
+    kw_a = _extract_keyword_set(card_a)
+    kw_b = _extract_keyword_set(card_b)
+    if kw_a and kw_b:
+        overlap = kw_a.intersection(kw_b)
+        keyword_score = min(1.0, len(overlap) / max(len(kw_a.union(kw_b)) * 0.3, 1.0))
+    else:
+        keyword_score = 0.0
+
+    # Theme co-support
+    theme_score = _compute_pairwise_theme_co_support(card_a, card_b)
+
+    # Tribal match
+    tribal_score = _compute_pairwise_tribal(card_a, card_b)
+
+    # Enabler/payoff
+    enabler_score = _compute_enabler_payoff(card_a, card_b)
+
+    raw = (
+        keyword_score * keyword_weight
+        + theme_score * theme_weight
+        + tribal_score * tribal_weight
+        + enabler_score * enabler_weight
+    )
+    return min(1.0, max(0.0, raw))
+
+
+def compute_package_score(cards: list[Card]) -> float:
+    """Compute the average pairwise synergy for a small group of cards.
+
+    Args:
+        cards: List of 0-5 cards to evaluate as a package.
+
+    Returns:
+        Mean of all pairwise synergy scores, or 0.0 if fewer than 2 cards.
+    """
+    if len(cards) < 2:
+        return 0.0
+
+    total = 0.0
+    pair_count = 0
+    for i in range(len(cards)):
+        for j in range(i + 1, len(cards)):
+            total += compute_pairwise_synergy(cards[i], cards[j])
+            pair_count += 1
+
+    return total / pair_count
+
+
+def find_synergy_packages(
+    candidates: list[Card],
+    top_n: int = 50,
+    min_synergy: float = 0.3,
+) -> list[tuple[str, str, float]]:
+    """Find pairs of cards with high pairwise synergy.
+
+    Evaluates all pairs among the first ``top_n`` candidates and returns
+    those whose pairwise synergy meets the minimum threshold.
+
+    Args:
+        candidates: List of candidate cards (order matters for top_n cutoff).
+        top_n: Number of candidates to consider from the front of the list.
+        min_synergy: Minimum pairwise synergy score to include in results.
+
+    Returns:
+        List of (card_a_name, card_b_name, score) tuples sorted by score
+        descending.
+    """
+    subset = candidates[:top_n]
+    if len(subset) < 2:
+        return []
+
+    results: list[tuple[str, str, float]] = []
+    for i in range(len(subset)):
+        for j in range(i + 1, len(subset)):
+            score = compute_pairwise_synergy(subset[i], subset[j])
+            if score >= min_synergy:
+                results.append((subset[i].name, subset[j].name, score))
+
+    results.sort(key=lambda x: x[2], reverse=True)
+    return results

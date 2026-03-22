@@ -1,32 +1,45 @@
-"""Sync router - database sync with Scryfall via Server-Sent Events."""
+"""Sync router - database sync with Scryfall via Server-Sent Events.
+
+Uses a queue-based bridge to stream progress events from the sync
+service (running in a background thread) to the async SSE generator
+in real time, avoiding the buffering problem where all events would
+only arrive after sync completion.
+"""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import queue
+from typing import Any
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
-from mtg_deck_maker.api.web.schemas.sync import SyncRequest, SyncResultResponse
+from mtg_deck_maker.api.web.schemas.sync import SyncRequest
 from mtg_deck_maker.services.sync_service import SyncService
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["sync"])
 
+# Sentinel object to signal the sync thread has finished.
+_DONE = object()
 
-def _sse_event(data: dict) -> str:
+
+def _sse_event(data: dict[str, Any]) -> str:
     """Format a dict as an SSE data event string."""
     return f"data: {json.dumps(data)}\n\n"
 
 
 @router.post("/sync")
-def run_sync(req: SyncRequest) -> StreamingResponse:
+async def run_sync(req: SyncRequest) -> StreamingResponse:
     """Sync the local card database with Scryfall.
 
-    Streams progress events via Server-Sent Events. The final event
-    contains the complete SyncResult.
+    Streams progress events via Server-Sent Events. The sync runs in a
+    background thread while the async generator yields events as they
+    arrive through a ``queue.Queue`` bridge.
 
     Args:
         req: SyncRequest with full flag controlling sync mode.
@@ -34,22 +47,22 @@ def run_sync(req: SyncRequest) -> StreamingResponse:
     Returns:
         StreamingResponse with text/event-stream content.
     """
-    def event_stream():
-        progress_events: list[dict] = []
+    event_queue: queue.Queue[dict[str, Any] | object] = queue.Queue()
 
+    def _run_sync_in_thread() -> None:
+        """Execute the sync in a background thread and push events to the queue."""
         def progress_callback(stage: str, current: int, total: int) -> None:
-            event = {"type": "progress", "stage": stage, "current": current, "total": total}
-            progress_events.append(event)
+            event_queue.put({
+                "type": "progress",
+                "stage": stage,
+                "current": current,
+                "total": total,
+            })
 
         try:
             service = SyncService()
             result = service.sync(full=req.full, progress_callback=progress_callback)
 
-            # Yield all buffered progress events
-            for event in progress_events:
-                yield _sse_event(event)
-
-            # Yield the final result
             result_data = {
                 "type": "result",
                 "cards_added": result.cards_added,
@@ -62,11 +75,32 @@ def run_sync(req: SyncRequest) -> StreamingResponse:
                 "success": result.success,
                 "summary": result.summary(),
             }
-            yield _sse_event(result_data)
+            event_queue.put(result_data)
 
         except Exception as exc:
             logger.exception("Sync failed")
-            yield _sse_event({"type": "error", "detail": str(exc)})
+            event_queue.put({"type": "error", "detail": str(exc)})
+
+        finally:
+            event_queue.put(_DONE)
+
+    async def event_stream():
+        """Async generator that yields SSE events from the queue."""
+        loop = asyncio.get_running_loop()
+
+        # Start the sync in a background thread.
+        sync_task = loop.run_in_executor(None, _run_sync_in_thread)
+
+        try:
+            while True:
+                # Read from the thread-safe queue without blocking the event loop.
+                item = await loop.run_in_executor(None, event_queue.get)
+                if item is _DONE:
+                    break
+                yield _sse_event(item)
+        finally:
+            # Ensure the background thread finishes even if the client disconnects.
+            await sync_task
 
     return StreamingResponse(
         event_stream(),

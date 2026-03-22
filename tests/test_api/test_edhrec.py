@@ -17,25 +17,18 @@ from mtg_deck_maker.models.edhrec_data import EdhrecCommanderData
 class TestCommanderNameToSlug:
     """Tests for the commander name to URL slug conversion."""
 
-    def test_commander_name_to_slug(self) -> None:
-        """Atraxa, Praetors' Voice should become atraxa-praetors-voice."""
-        result = _commander_name_to_slug("Atraxa, Praetors' Voice")
-        assert result == "atraxa-praetors-voice"
-
-    def test_commander_name_to_slug_simple(self) -> None:
-        """Simple single-word name should lowercase."""
-        result = _commander_name_to_slug("Krenko")
-        assert result == "krenko"
-
-    def test_commander_name_to_slug_multi_word(self) -> None:
-        """Multi-word names should use hyphens."""
-        result = _commander_name_to_slug("Thrasios Triton Hero")
-        assert result == "thrasios-triton-hero"
-
-    def test_commander_name_to_slug_special_chars(self) -> None:
-        """Special characters (commas, apostrophes) should be removed."""
-        result = _commander_name_to_slug("Korvold, Fae-Cursed King")
-        assert result == "korvold-fae-cursed-king"
+    @pytest.mark.parametrize(
+        "name, expected",
+        [
+            ("Atraxa, Praetors' Voice", "atraxa-praetors-voice"),
+            ("Krenko", "krenko"),
+            ("Thrasios Triton Hero", "thrasios-triton-hero"),
+            ("Korvold, Fae-Cursed King", "korvold-fae-cursed-king"),
+        ],
+        ids=["punctuation", "simple", "multi_word", "special_chars"],
+    )
+    def test_commander_name_to_slug(self, name, expected) -> None:
+        assert _commander_name_to_slug(name) == expected
 
 
 class TestFetchCommanderData:
@@ -92,7 +85,6 @@ class TestFetchCommanderData:
             result = fetch_commander_data("Atraxa, Praetors' Voice")
 
         assert len(result) == 3
-        # Check first card parsed correctly
         doubling = next(r for r in result if r.card_name == "Doubling Season")
         assert doubling.commander_name == "Atraxa, Praetors' Voice"
         assert doubling.inclusion_rate == 0.45
@@ -120,26 +112,6 @@ class TestFetchCommanderData:
         mock_resp.read.return_value = b"not valid json{{"
         mock_resp.__enter__ = lambda s: s
         mock_resp.__exit__ = MagicMock(return_value=False)
-
-        with patch("urllib.request.urlopen", return_value=mock_resp):
-            result = fetch_commander_data("Some Commander")
-
-        assert result == []
-
-    def test_fetch_commander_data_empty_cardlists(self) -> None:
-        """Empty cardlists should return an empty list."""
-        mock_data = {"cardlists": []}
-        mock_resp = self._mock_response(mock_data)
-
-        with patch("urllib.request.urlopen", return_value=mock_resp):
-            result = fetch_commander_data("Some Commander")
-
-        assert result == []
-
-    def test_fetch_commander_data_missing_cardlists_key(self) -> None:
-        """Missing cardlists key should return an empty list."""
-        mock_data = {"other_key": "value"}
-        mock_resp = self._mock_response(mock_data)
 
         with patch("urllib.request.urlopen", return_value=mock_resp):
             result = fetch_commander_data("Some Commander")

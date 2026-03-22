@@ -61,28 +61,20 @@ def _make_deck(card_id: int) -> Deck:
 
 
 class TestCreateDeck:
-    def test_create_returns_int_id(self, deck_db) -> None:
+    def test_create_persists_deck_and_cards(self, deck_db) -> None:
         db, card_id = deck_db
         repo = DeckRepository(db)
         deck_id = repo.create_deck(_make_deck(card_id))
         assert isinstance(deck_id, int)
         assert deck_id > 0
 
-    def test_create_persists_deck_row(self, deck_db) -> None:
-        db, card_id = deck_db
-        repo = DeckRepository(db)
-        deck_id = repo.create_deck(_make_deck(card_id))
-
+        # Verify deck row
         cursor = db.execute("SELECT * FROM decks WHERE id = ?", (deck_id,))
         row = cursor.fetchone()
         assert row is not None
         assert row["name"] == "Test Deck"
 
-    def test_create_persists_deck_cards(self, deck_db) -> None:
-        db, card_id = deck_db
-        repo = DeckRepository(db)
-        deck_id = repo.create_deck(_make_deck(card_id))
-
+        # Verify deck cards
         cursor = db.execute(
             "SELECT * FROM deck_cards WHERE deck_id = ?", (deck_id,)
         )
@@ -93,7 +85,7 @@ class TestCreateDeck:
 
 
 class TestGetDeck:
-    def test_get_existing_deck(self, deck_db) -> None:
+    def test_get_existing_deck_with_cards(self, deck_db) -> None:
         db, card_id = deck_db
         repo = DeckRepository(db)
         deck_id = repo.create_deck(_make_deck(card_id))
@@ -102,14 +94,6 @@ class TestGetDeck:
         assert deck is not None
         assert deck.name == "Test Deck"
         assert len(deck.cards) == 1
-
-    def test_get_deck_cards_loaded(self, deck_db) -> None:
-        db, card_id = deck_db
-        repo = DeckRepository(db)
-        deck_id = repo.create_deck(_make_deck(card_id))
-
-        deck = repo.get_deck(deck_id)
-        assert deck is not None
         dc = deck.cards[0]
         assert dc.card_id == card_id
         assert dc.is_commander is True
@@ -141,7 +125,7 @@ class TestListDecks:
 
 
 class TestDeleteDeck:
-    def test_delete_existing_deck(self, deck_db) -> None:
+    def test_delete_existing_deck_and_cards(self, deck_db) -> None:
         db, card_id = deck_db
         repo = DeckRepository(db)
         deck_id = repo.create_deck(_make_deck(card_id))
@@ -149,12 +133,6 @@ class TestDeleteDeck:
         result = repo.delete_deck(deck_id)
         assert result is True
         assert repo.get_deck(deck_id) is None
-
-    def test_delete_removes_deck_cards(self, deck_db) -> None:
-        db, card_id = deck_db
-        repo = DeckRepository(db)
-        deck_id = repo.create_deck(_make_deck(card_id))
-        repo.delete_deck(deck_id)
 
         cursor = db.execute(
             "SELECT COUNT(*) as cnt FROM deck_cards WHERE deck_id = ?",

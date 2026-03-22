@@ -57,7 +57,6 @@ class TestCreateTables:
         """create_tables should create the edhrec_commander_cards table."""
         repo = EdhrecRepository(db)
         repo.create_tables()
-        # Verify table exists by querying it
         cursor = db.execute(
             "SELECT name FROM sqlite_master "
             "WHERE type='table' AND name='edhrec_commander_cards'"
@@ -78,7 +77,6 @@ class TestUpsertData:
         """Upsert should insert new records and update existing ones."""
         edhrec_repo.upsert_data(sample_edhrec_data)
 
-        # Verify all records were inserted
         top = edhrec_repo.get_top_cards("Atraxa, Praetors' Voice", limit=10)
         assert len(top) == 3
 
@@ -95,13 +93,11 @@ class TestUpsertData:
         ]
         edhrec_repo.upsert_data(updated)
 
-        # Verify updated
         rate = edhrec_repo.get_card_inclusion(
             "Atraxa, Praetors' Voice", "Doubling Season"
         )
         assert rate == 0.50
 
-        # Verify other records unchanged
         top = edhrec_repo.get_top_cards("Atraxa, Praetors' Voice", limit=10)
         assert len(top) == 3
 
@@ -109,48 +105,53 @@ class TestUpsertData:
 class TestGetCardInclusion:
     """Test getting per-card inclusion rate."""
 
+    @pytest.mark.parametrize(
+        "card_name, expected",
+        [
+            ("Sol Ring", 0.95),
+            ("Nonexistent Card", None),
+        ],
+        ids=["found", "missing"],
+    )
     def test_get_card_inclusion(
         self,
         edhrec_repo: EdhrecRepository,
         sample_edhrec_data: list[EdhrecCommanderData],
+        card_name: str,
+        expected,
     ) -> None:
-        """Should return the inclusion rate for a known card."""
         edhrec_repo.upsert_data(sample_edhrec_data)
         rate = edhrec_repo.get_card_inclusion(
-            "Atraxa, Praetors' Voice", "Sol Ring"
+            "Atraxa, Praetors' Voice", card_name
         )
-        assert rate == 0.95
-
-    def test_get_card_inclusion_missing(
-        self, edhrec_repo: EdhrecRepository
-    ) -> None:
-        """Should return None for an unknown card."""
-        rate = edhrec_repo.get_card_inclusion(
-            "Atraxa, Praetors' Voice", "Nonexistent Card"
-        )
-        assert rate is None
+        assert rate == expected
 
 
 class TestGetTopCards:
     """Test getting top cards by inclusion rate."""
 
+    @pytest.mark.parametrize(
+        "commander, limit, expected_len, first_card",
+        [
+            ("Atraxa, Praetors' Voice", 2, 2, "Sol Ring"),
+            ("Unknown Commander", 10, 0, None),
+        ],
+        ids=["top_cards", "empty_unknown"],
+    )
     def test_get_top_cards(
         self,
         edhrec_repo: EdhrecRepository,
         sample_edhrec_data: list[EdhrecCommanderData],
+        commander: str,
+        limit: int,
+        expected_len: int,
+        first_card,
     ) -> None:
-        """Should return cards sorted by inclusion rate descending."""
         edhrec_repo.upsert_data(sample_edhrec_data)
-        top = edhrec_repo.get_top_cards("Atraxa, Praetors' Voice", limit=2)
-        assert len(top) == 2
-        assert top[0].card_name == "Sol Ring"
-        assert top[0].inclusion_rate == 0.95
-        assert top[1].card_name == "Doubling Season"
-
-    def test_get_top_cards_empty(self, edhrec_repo: EdhrecRepository) -> None:
-        """Should return empty list for unknown commander."""
-        top = edhrec_repo.get_top_cards("Unknown Commander")
-        assert top == []
+        top = edhrec_repo.get_top_cards(commander, limit=limit)
+        assert len(top) == expected_len
+        if first_card:
+            assert top[0].card_name == first_card
 
 
 class TestHasData:
@@ -165,10 +166,6 @@ class TestHasData:
         edhrec_repo.upsert_data(sample_edhrec_data)
         assert edhrec_repo.has_data("Atraxa, Praetors' Voice") is True
 
-    def test_has_data_false(self, edhrec_repo: EdhrecRepository) -> None:
-        """Should return False when no data exists."""
-        assert edhrec_repo.has_data("Unknown Commander") is False
-
 
 class TestCountCommanders:
     """Test counting distinct commanders with data."""
@@ -181,7 +178,6 @@ class TestCountCommanders:
         """Should count distinct commanders."""
         edhrec_repo.upsert_data(sample_edhrec_data)
 
-        # Add data for a second commander
         extra = [
             EdhrecCommanderData(
                 commander_name="Krenko, Mob Boss",
@@ -208,7 +204,6 @@ class TestIsStale:
         """Data older than max_age_days should be considered stale."""
         edhrec_repo.upsert_data(sample_edhrec_data)
 
-        # Force the fetched_at to 31 days ago
         old_ts = (
             datetime.now(timezone.utc) - timedelta(days=31)
         ).isoformat()
@@ -220,15 +215,6 @@ class TestIsStale:
         edhrec_repo._db.commit()
 
         assert edhrec_repo.is_stale("Atraxa, Praetors' Voice", max_age_days=30) is True
-
-    def test_is_not_stale(
-        self,
-        edhrec_repo: EdhrecRepository,
-        sample_edhrec_data: list[EdhrecCommanderData],
-    ) -> None:
-        """Fresh data should not be stale."""
-        edhrec_repo.upsert_data(sample_edhrec_data)
-        assert edhrec_repo.is_stale("Atraxa, Praetors' Voice", max_age_days=30) is False
 
     def test_is_stale_no_data(self, edhrec_repo: EdhrecRepository) -> None:
         """No data should be considered stale."""

@@ -8,8 +8,8 @@ from fastapi.testclient import TestClient
 
 
 class TestResearch:
-    def test_research_with_mocked_provider(self, client: TestClient) -> None:
-        """Research endpoint returns structured result when LLM is available."""
+    def test_research_with_mocked_provider_and_budget(self, client: TestClient) -> None:
+        """Research endpoint returns structured result and passes budget when LLM is available."""
         mock_result = MagicMock()
         mock_result.commander_name = "Atraxa, Praetors' Voice"
         mock_result.strategy_overview = "Proliferate everything."
@@ -21,12 +21,6 @@ class TestResearch:
         mock_result.parse_success = True
 
         with (
-            patch(
-                "mtg_deck_maker.advisor.llm_provider.get_provider"
-            ) as mock_get_provider,
-            patch(
-                "mtg_deck_maker.services.research_service.ResearchService"
-            ) as MockService,
             patch(
                 "mtg_deck_maker.api.web.routers.research.get_provider"
             ) as router_get_provider,
@@ -40,7 +34,11 @@ class TestResearch:
 
             resp = client.post(
                 "/api/research",
-                json={"commander": "Atraxa, Praetors' Voice", "provider": "auto"},
+                json={
+                    "commander": "Atraxa, Praetors' Voice",
+                    "provider": "auto",
+                    "budget": 75.0,
+                },
             )
 
         assert resp.status_code == 200
@@ -49,6 +47,9 @@ class TestResearch:
         assert data["strategy_overview"] == "Proliferate everything."
         assert "Doubling Season" in data["key_cards"]
         assert data["parse_success"] is True
+        # Verify budget was passed
+        call_kwargs = RouterMockService.return_value.research_commander.call_args
+        assert call_kwargs.kwargs.get("budget") == 75.0
 
     def test_research_no_provider_returns_503(self, client: TestClient) -> None:
         """Research endpoint returns 503 when no LLM provider is available."""
@@ -63,40 +64,3 @@ class TestResearch:
             )
 
         assert resp.status_code == 503
-
-    def test_research_with_budget(self, client: TestClient) -> None:
-        """Research endpoint passes budget to the research service."""
-        mock_result = MagicMock()
-        mock_result.commander_name = "Atraxa, Praetors' Voice"
-        mock_result.strategy_overview = "Budget strategy."
-        mock_result.key_cards = []
-        mock_result.budget_staples = ["Sol Ring"]
-        mock_result.combos = []
-        mock_result.win_conditions = []
-        mock_result.cards_to_avoid = []
-        mock_result.parse_success = True
-
-        with (
-            patch(
-                "mtg_deck_maker.api.web.routers.research.get_provider"
-            ) as mock_get_provider,
-            patch(
-                "mtg_deck_maker.api.web.routers.research.ResearchService"
-            ) as MockService,
-        ):
-            mock_llm = MagicMock()
-            mock_get_provider.return_value = mock_llm
-            MockService.return_value.research_commander.return_value = mock_result
-
-            resp = client.post(
-                "/api/research",
-                json={
-                    "commander": "Atraxa, Praetors' Voice",
-                    "budget": 75.0,
-                },
-            )
-
-        assert resp.status_code == 200
-        # Verify budget was passed
-        call_kwargs = MockService.return_value.research_commander.call_args
-        assert call_kwargs.kwargs.get("budget") == 75.0

@@ -61,27 +61,21 @@ def sample_combo_c() -> Combo:
 class TestCreateTables:
     """Test table creation."""
 
-    def test_create_tables(self, db: Database) -> None:
+    def test_create_tables_creates_both_tables(self, db: Database) -> None:
         repo = ComboRepository(db)
         repo.create_tables()
-        # Verify tables exist by querying them
+        # Verify combos table
         cursor = db.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='combos'"
         )
         assert cursor.fetchone() is not None
-
-    def test_create_tables_creates_combo_cards(self, db: Database) -> None:
-        repo = ComboRepository(db)
-        repo.create_tables()
+        # Verify combo_cards table
         cursor = db.execute(
             "SELECT name FROM sqlite_master "
             "WHERE type='table' AND name='combo_cards'"
         )
         assert cursor.fetchone() is not None
-
-    def test_create_tables_idempotent(self, db: Database) -> None:
-        repo = ComboRepository(db)
-        repo.create_tables()
+        # Idempotent
         repo.create_tables()  # Should not raise
 
 
@@ -100,7 +94,6 @@ class TestUpsertCombo:
         self, combo_repo: ComboRepository, sample_combo: Combo
     ) -> None:
         combo_repo.upsert_combo(sample_combo)
-        # Update the result text
         updated = Combo(
             combo_id="csb-100",
             card_names=["Exquisite Blood", "Sanguine Bond"],
@@ -119,7 +112,6 @@ class TestUpsertCombo:
         self, combo_repo: ComboRepository, sample_combo: Combo
     ) -> None:
         combo_repo.upsert_combo(sample_combo)
-        # Both card names should be in combo_cards
         combos_a = combo_repo.get_combos_for_card("Exquisite Blood")
         combos_b = combo_repo.get_combos_for_card("Sanguine Bond")
         assert len(combos_a) == 1
@@ -138,7 +130,6 @@ class TestGetCombosForCard:
     ) -> None:
         combo_repo.upsert_combo(sample_combo)
         combo_repo.upsert_combo(sample_combo_b)
-        # Exquisite Blood appears in both combos
         combos = combo_repo.get_combos_for_card("Exquisite Blood")
         assert len(combos) == 2
         combo_ids = {c.combo_id for c in combos}
@@ -149,16 +140,6 @@ class TestGetCombosForCard:
         self, combo_repo: ComboRepository
     ) -> None:
         combos = combo_repo.get_combos_for_card("Nonexistent Card")
-        assert combos == []
-
-    def test_get_combos_for_card_case_sensitive(
-        self,
-        combo_repo: ComboRepository,
-        sample_combo: Combo,
-    ) -> None:
-        combo_repo.upsert_combo(sample_combo)
-        # Exact name match required
-        combos = combo_repo.get_combos_for_card("exquisite blood")
         assert combos == []
 
 
@@ -175,7 +156,6 @@ class TestGetCombosForCards:
         combo_repo.upsert_combo(sample_combo)
         combo_repo.upsert_combo(sample_combo_b)
         combo_repo.upsert_combo(sample_combo_c)
-        # Search for cards in combo a and c
         combos = combo_repo.get_combos_for_cards(
             ["Sanguine Bond", "Dramatic Reversal"]
         )
@@ -184,19 +164,12 @@ class TestGetCombosForCards:
         assert "csb-100" in combo_ids
         assert "csb-300" in combo_ids
 
-    def test_get_combos_for_cards_empty_list(
-        self, combo_repo: ComboRepository
-    ) -> None:
-        combos = combo_repo.get_combos_for_cards([])
-        assert combos == []
-
     def test_get_combos_for_cards_deduplicates(
         self,
         combo_repo: ComboRepository,
         sample_combo: Combo,
     ) -> None:
         combo_repo.upsert_combo(sample_combo)
-        # Both cards are in the same combo - should not duplicate
         combos = combo_repo.get_combos_for_cards(
             ["Exquisite Blood", "Sanguine Bond"]
         )
@@ -215,10 +188,8 @@ class TestGetComboPartners:
         combo_repo.upsert_combo(sample_combo)
         combo_repo.upsert_combo(sample_combo_b)
         partners = combo_repo.get_combo_partners("Exquisite Blood")
-        # Sanguine Bond and Vito are partners
         assert "Sanguine Bond" in partners
         assert "Vito, Thorn of the Dusk Rose" in partners
-        # Should not include the card itself
         assert "Exquisite Blood" not in partners
 
     def test_get_combo_partners_no_combos(

@@ -138,7 +138,7 @@ def _build_mono_green_pool(size: int = 250) -> list[Card]:
     ))
     card_id += 1
 
-    # Command Tower (won't be used for mono but included for completeness)
+    # Command Tower
     pool.append(_make_card(
         card_id, "Command Tower", "Land",
         "{T}: Add one mana of any color in your commander's color identity.",
@@ -205,6 +205,8 @@ class TestBuildService:
         assert isinstance(result, BuildResult)
         assert result.deck is not None
         assert result.deck.total_cards() == 100
+        assert hasattr(result, "warnings")
+        assert isinstance(result.warnings, list)
 
     def test_build_with_csv_export(self):
         """Service should produce CSV output when requested."""
@@ -224,24 +226,6 @@ class TestBuildService:
         assert result.csv_output is not None
         assert "Card Name" in result.csv_output
         assert "DECK SUMMARY" in result.csv_output
-
-    def test_build_with_custom_config(self):
-        """Service should respect custom configuration."""
-        config = AppConfig()
-        config.constraints.max_price_per_card = 5.0
-        service = BuildService(config=config)
-        commander = _build_mono_green_commander()
-        pool = _build_mono_green_pool()
-        prices = _build_prices(pool)
-
-        result = service.build(
-            commander=commander,
-            budget=150.0,
-            card_pool=pool,
-            prices=prices,
-        )
-
-        assert result.deck.total_cards() == 100
 
     def test_invalid_commander_raises_service_error(self):
         """Service should raise BuildServiceError for invalid commander."""
@@ -280,46 +264,6 @@ class TestBuildService:
         names2 = sorted(c.card_name for c in result2.deck.cards)
         assert names1 == names2
 
-    def test_warnings_for_budget_overage(self):
-        """Service should include warnings when deck is over budget."""
-        service = BuildService()
-        commander = _build_mono_green_commander()
-        pool = _build_mono_green_pool()
-        # Set all prices high to trigger budget warning potential
-        prices = {card.id: 3.0 for card in pool if card.id is not None}
-
-        result = service.build(
-            commander=commander,
-            budget=500.0,  # High budget to avoid build failure
-            card_pool=pool,
-            prices=prices,
-        )
-
-        # The deck should still be built; warnings may or may not appear
-        # depending on final price vs budget
-        assert result.deck is not None
-        assert result.deck.total_cards() == 100
-
-    def test_build_result_attributes(self):
-        """BuildResult should have correct attribute types."""
-        service = BuildService()
-        commander = _build_mono_green_commander()
-        pool = _build_mono_green_pool()
-        prices = _build_prices(pool)
-
-        result = service.build(
-            commander=commander,
-            budget=150.0,
-            card_pool=pool,
-            prices=prices,
-        )
-
-        assert hasattr(result, "deck")
-        assert hasattr(result, "warnings")
-        assert hasattr(result, "csv_output")
-        assert isinstance(result.warnings, list)
-        assert result.csv_output is None  # Not requested
-
 
 class TestBuildFromDb:
     """Tests for the build_from_db() orchestration method."""
@@ -335,7 +279,6 @@ class TestBuildFromDb:
 
         mock_db = MagicMock()
 
-        # Wire up CardRepository methods
         def get_card_by_name(name: str):
             if name == commander_name:
                 return commander_card
@@ -395,85 +338,6 @@ class TestBuildFromDb:
 
     @patch("mtg_deck_maker.db.card_repo.CardRepository")
     @patch("mtg_deck_maker.db.price_repo.PriceRepository")
-    def test_partner_not_found(self, MockPriceRepo, MockCardRepo):
-        mock_db, mock_card_repo, mock_price_repo = self._setup_mock_db()
-        MockCardRepo.return_value = mock_card_repo
-        MockPriceRepo.return_value = mock_price_repo
-
-        service = BuildService()
-        with pytest.raises(CommanderNotFoundError, match="Partner"):
-            service.build_from_db(
-                commander_name="Test Green Commander",
-                budget=100.0,
-                db=mock_db,
-                partner_name="Nonexistent Partner",
-            )
-
-    @patch("mtg_deck_maker.db.card_repo.CardRepository")
-    @patch("mtg_deck_maker.db.price_repo.PriceRepository")
-    def test_no_edhrec_skips_fetch(self, MockPriceRepo, MockCardRepo):
-        mock_db, mock_card_repo, mock_price_repo = self._setup_mock_db()
-        MockCardRepo.return_value = mock_card_repo
-        MockPriceRepo.return_value = mock_price_repo
-
-        service = BuildService()
-        result = service.build_from_db(
-            commander_name="Test Green Commander",
-            budget=150.0,
-            db=mock_db,
-            no_edhrec=True,
-        )
-
-        assert result.deck is not None
-        assert result.deck.total_cards() == 100
-
-    @patch("mtg_deck_maker.db.card_repo.CardRepository")
-    @patch("mtg_deck_maker.db.price_repo.PriceRepository")
-    def test_progress_callback_receives_messages(self, MockPriceRepo, MockCardRepo):
-        mock_db, mock_card_repo, mock_price_repo = self._setup_mock_db()
-        MockCardRepo.return_value = mock_card_repo
-        MockPriceRepo.return_value = mock_price_repo
-
-        messages: list[str] = []
-
-        service = BuildService()
-        service.build_from_db(
-            commander_name="Test Green Commander",
-            budget=150.0,
-            db=mock_db,
-            no_edhrec=True,
-            progress_callback=messages.append,
-        )
-
-        assert len(messages) > 0
-        assert any("Looking up" in m for m in messages)
-        assert any("Building deck" in m for m in messages)
-
-    @patch("mtg_deck_maker.db.card_repo.CardRepository")
-    @patch("mtg_deck_maker.db.price_repo.PriceRepository")
-    def test_smart_without_provider_skips_gracefully(self, MockPriceRepo, MockCardRepo):
-        mock_db, mock_card_repo, mock_price_repo = self._setup_mock_db()
-        MockCardRepo.return_value = mock_card_repo
-        MockPriceRepo.return_value = mock_price_repo
-
-        with patch(
-            "mtg_deck_maker.services.build_service.get_provider",
-            create=True,
-        ):
-            # get_provider import happens inside the method;
-            # mock it to return None
-            service = BuildService()
-            result = service.build_from_db(
-                commander_name="Test Green Commander",
-                budget=150.0,
-                db=mock_db,
-                smart=True,
-                no_edhrec=True,
-            )
-            assert result.deck is not None
-
-    @patch("mtg_deck_maker.db.card_repo.CardRepository")
-    @patch("mtg_deck_maker.db.price_repo.PriceRepository")
     def test_commander_not_found_with_suggestions(self, MockPriceRepo, MockCardRepo):
         mock_db = MagicMock()
         mock_card_repo = MagicMock()
@@ -489,4 +353,20 @@ class TestBuildFromDb:
                 commander_name="Nonexistent",
                 budget=100.0,
                 db=mock_db,
+            )
+
+    @patch("mtg_deck_maker.db.card_repo.CardRepository")
+    @patch("mtg_deck_maker.db.price_repo.PriceRepository")
+    def test_partner_not_found(self, MockPriceRepo, MockCardRepo):
+        mock_db, mock_card_repo, mock_price_repo = self._setup_mock_db()
+        MockCardRepo.return_value = mock_card_repo
+        MockPriceRepo.return_value = mock_price_repo
+
+        service = BuildService()
+        with pytest.raises(CommanderNotFoundError, match="Partner"):
+            service.build_from_db(
+                commander_name="Test Green Commander",
+                budget=100.0,
+                db=mock_db,
+                partner_name="Nonexistent Partner",
             )

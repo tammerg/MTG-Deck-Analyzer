@@ -33,31 +33,19 @@ class TestBuildContext:
         assert "$150.00" in context
         assert "ramp" in context
 
-    def test_weak_categories_in_context(self):
-        """Context should include weak categories."""
+    def test_weak_strong_and_recommendations_in_context(self):
+        """Context should include weak categories, strong categories, and recommendations."""
         analysis = DeckAnalysis(
             weak_categories=["ramp", "card_draw"],
+            strong_categories=["removal"],
+            recommendations=["Add more ramp", "Lower your curve"],
         )
         context = _build_context(analysis)
         assert "Weak Areas" in context
         assert "ramp" in context
         assert "card_draw" in context
-
-    def test_strong_categories_in_context(self):
-        """Context should include strong categories."""
-        analysis = DeckAnalysis(
-            strong_categories=["removal"],
-        )
-        context = _build_context(analysis)
         assert "Strong Areas" in context
         assert "removal" in context
-
-    def test_recommendations_in_context(self):
-        """Context should include existing recommendations."""
-        analysis = DeckAnalysis(
-            recommendations=["Add more ramp", "Lower your curve"],
-        )
-        context = _build_context(analysis)
         assert "Add more ramp" in context
         assert "Lower your curve" in context
 
@@ -130,22 +118,16 @@ class TestGetDeckAdviceWithProvider:
 class TestGetDeckAdviceNoProvider:
     """Tests for the fallback path when no LLM provider is available."""
 
-    def test_no_provider_returns_fallback(self):
-        """Should return fallback message when no provider is available."""
+    @pytest.mark.parametrize(
+        "api_key",
+        [None, "explicit-key"],
+        ids=["no_key", "explicit_key_ignored"],
+    )
+    def test_no_provider_returns_fallback(self, api_key):
+        """Should return fallback message regardless of api_key when no provider is available."""
         with patch(
             "mtg_deck_maker.advisor.llm_provider.get_provider",
             return_value=None,
         ):
-            result = get_deck_advice(DeckAnalysis(), "Help!", api_key=None)
-        assert "ANTHROPIC_API_KEY" in result
-
-    def test_explicit_api_key_ignored_without_provider(self):
-        """api_key param is ignored; only the provider abstraction matters."""
-        with patch(
-            "mtg_deck_maker.advisor.llm_provider.get_provider",
-            return_value=None,
-        ):
-            result = get_deck_advice(
-                DeckAnalysis(), "Help", api_key="explicit-key"
-            )
+            result = get_deck_advice(DeckAnalysis(), "Help!", api_key=api_key)
         assert "ANTHROPIC_API_KEY" in result

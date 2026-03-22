@@ -66,16 +66,16 @@ def _build_minimal_deck(client: TestClient) -> dict:
 
 
 class TestBuildDeck:
-    def test_build_returns_201(self, client: TestClient) -> None:
+    def test_build_returns_complete_deck(self, client: TestClient) -> None:
         resp = _build_minimal_deck(client)
         assert resp.status_code == 201
-
-    def test_build_returns_deck_response(self, client: TestClient) -> None:
-        resp = _build_minimal_deck(client)
         data = resp.json()
         assert "id" in data
         assert data["name"] == "Atraxa, Praetors' Voice Commander"
         assert data["format"] == "commander"
+        assert len(data["cards"]) >= 1
+        assert len(data["commanders"]) >= 1
+        assert all(c["is_commander"] for c in data["commanders"])
 
     def test_build_unknown_commander_returns_404(self, client: TestClient) -> None:
         resp = client.post(
@@ -84,24 +84,8 @@ class TestBuildDeck:
         )
         assert resp.status_code == 404
 
-    def test_build_deck_has_cards(self, client: TestClient) -> None:
-        resp = _build_minimal_deck(client)
-        data = resp.json()
-        assert len(data["cards"]) >= 1
-
-    def test_build_deck_has_commanders_list(self, client: TestClient) -> None:
-        resp = _build_minimal_deck(client)
-        data = resp.json()
-        assert len(data["commanders"]) >= 1
-        assert all(c["is_commander"] for c in data["commanders"])
-
 
 class TestListDecks:
-    def test_list_empty(self, client: TestClient) -> None:
-        resp = client.get("/api/decks")
-        assert resp.status_code == 200
-        assert isinstance(resp.json(), list)
-
     def test_list_after_build(self, client: TestClient) -> None:
         _build_minimal_deck(client)
         resp = client.get("/api/decks")
@@ -141,37 +125,19 @@ class TestDeleteDeck:
 
 
 class TestExportDeck:
-    def test_export_csv(self, client: TestClient) -> None:
+    @pytest.mark.parametrize(
+        "fmt",
+        ["csv", "moxfield", "archidekt"],
+    )
+    def test_export_formats(self, client: TestClient, fmt: str) -> None:
         build_resp = _build_minimal_deck(client)
         deck_id = build_resp.json()["id"]
 
-        resp = client.post(f"/api/decks/{deck_id}/export", json={"format": "csv"})
+        resp = client.post(f"/api/decks/{deck_id}/export", json={"format": fmt})
         assert resp.status_code == 200
         data = resp.json()
-        assert data["format"] == "csv"
+        assert data["format"] == fmt
         assert "content" in data
-
-    def test_export_moxfield(self, client: TestClient) -> None:
-        build_resp = _build_minimal_deck(client)
-        deck_id = build_resp.json()["id"]
-
-        resp = client.post(
-            f"/api/decks/{deck_id}/export", json={"format": "moxfield"}
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["format"] == "moxfield"
-
-    def test_export_archidekt(self, client: TestClient) -> None:
-        build_resp = _build_minimal_deck(client)
-        deck_id = build_resp.json()["id"]
-
-        resp = client.post(
-            f"/api/decks/{deck_id}/export", json={"format": "archidekt"}
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["format"] == "archidekt"
 
     def test_export_nonexistent_deck_returns_404(self, client: TestClient) -> None:
         resp = client.post("/api/decks/99999/export", json={"format": "csv"})

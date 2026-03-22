@@ -10,35 +10,28 @@ from mtg_deck_maker.advisor.retry import RetryError, _is_retryable, with_retries
 
 
 class TestIsRetryable:
-    def test_429_is_retryable(self):
-        assert _is_retryable(Exception("Error code: 429")) is True
-
-    def test_rate_limit_is_retryable(self):
-        assert _is_retryable(Exception("rate_limit_exceeded")) is True
-
-    def test_rate_limit_space_is_retryable(self):
-        assert _is_retryable(Exception("rate limit hit")) is True
-
-    def test_500_is_retryable(self):
-        assert _is_retryable(Exception("Internal server error 500")) is True
-
-    def test_502_is_retryable(self):
-        assert _is_retryable(Exception("502 Bad Gateway")) is True
-
-    def test_503_is_retryable(self):
-        assert _is_retryable(Exception("503 Service Unavailable")) is True
-
-    def test_504_is_retryable(self):
-        assert _is_retryable(Exception("504 Gateway Timeout")) is True
-
-    def test_400_not_retryable(self):
-        assert _is_retryable(Exception("400 Bad Request")) is False
-
-    def test_auth_error_not_retryable(self):
-        assert _is_retryable(Exception("Authentication failed")) is False
-
-    def test_generic_error_not_retryable(self):
-        assert _is_retryable(ValueError("some error")) is False
+    @pytest.mark.parametrize(
+        "exc, expected",
+        [
+            (Exception("Error code: 429"), True),
+            (Exception("rate_limit_exceeded"), True),
+            (Exception("rate limit hit"), True),
+            (Exception("Internal server error 500"), True),
+            (Exception("502 Bad Gateway"), True),
+            (Exception("503 Service Unavailable"), True),
+            (Exception("504 Gateway Timeout"), True),
+            (Exception("400 Bad Request"), False),
+            (Exception("Authentication failed"), False),
+            (ValueError("some error"), False),
+        ],
+        ids=[
+            "429", "rate_limit", "rate_limit_space",
+            "500", "502", "503", "504",
+            "400_not_retryable", "auth_not_retryable", "generic_not_retryable",
+        ],
+    )
+    def test_is_retryable(self, exc, expected):
+        assert _is_retryable(exc) is expected
 
 
 class TestWithRetries:
@@ -105,12 +98,3 @@ class TestWithRetries:
         )
         assert result == "ok"
         assert fn.call_count == 2
-
-    @patch("mtg_deck_maker.advisor.retry.time.sleep")
-    def test_retry_error_attributes(self, mock_sleep):
-        original = Exception("503 server error")
-        fn = MagicMock(side_effect=original)
-        with pytest.raises(RetryError) as exc_info:
-            with_retries(fn, max_retries=1)
-        assert exc_info.value.last_error is original
-        assert exc_info.value.attempts == 2

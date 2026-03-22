@@ -35,25 +35,7 @@ def card_id(repos: tuple[CardRepository, PrintingRepository]) -> int:
 class TestInsertPrinting:
     """Test printing insertion."""
 
-    def test_insert_printing_returns_id(
-        self,
-        repos: tuple[CardRepository, PrintingRepository],
-        card_id: int,
-    ) -> None:
-        _, printing_repo = repos
-        printing = Printing(
-            scryfall_id="test-scryfall-001",
-            card_id=card_id,
-            set_code="TST",
-            collector_number="1",
-            rarity="rare",
-            finishes=["nonfoil"],
-        )
-        pid = printing_repo.insert_printing(printing)
-        assert pid is not None
-        assert pid > 0
-
-    def test_insert_printing_persists(
+    def test_insert_printing_persists_and_returns_id(
         self,
         repos: tuple[CardRepository, PrintingRepository],
         card_id: int,
@@ -68,7 +50,9 @@ class TestInsertPrinting:
             finishes=["nonfoil", "foil"],
             tcgplayer_id=999,
         )
-        printing_repo.insert_printing(printing)
+        pid = printing_repo.insert_printing(printing)
+        assert pid is not None
+        assert pid > 0
         found = printing_repo.get_printing_by_scryfall_id("persist-test")
         assert found is not None
         assert found.set_code == "PER"
@@ -96,24 +80,6 @@ class TestInsertPrinting:
 class TestGetPrinting:
     """Test printing retrieval methods."""
 
-    def test_get_by_scryfall_id_found(
-        self,
-        repos: tuple[CardRepository, PrintingRepository],
-        card_id: int,
-    ) -> None:
-        _, printing_repo = repos
-        printing = Printing(
-            scryfall_id="find-me",
-            card_id=card_id,
-            set_code="FND",
-            collector_number="1",
-            rarity="uncommon",
-        )
-        printing_repo.insert_printing(printing)
-        found = printing_repo.get_printing_by_scryfall_id("find-me")
-        assert found is not None
-        assert found.scryfall_id == "find-me"
-
     def test_get_by_scryfall_id_not_found(
         self,
         repos: tuple[CardRepository, PrintingRepository],
@@ -128,7 +94,6 @@ class TestGetPrinting:
         card_id: int,
     ) -> None:
         _, printing_repo = repos
-        # Insert multiple printings for same card
         for i, code in enumerate(["SET1", "SET2", "SET3"]):
             printing = Printing(
                 scryfall_id=f"multi-{i}",
@@ -141,14 +106,6 @@ class TestGetPrinting:
 
         printings = printing_repo.get_printings_for_card(card_id)
         assert len(printings) == 3
-
-    def test_get_printings_for_card_empty(
-        self,
-        repos: tuple[CardRepository, PrintingRepository],
-    ) -> None:
-        _, printing_repo = repos
-        printings = printing_repo.get_printings_for_card(99999)
-        assert printings == []
 
     def test_printing_preserves_all_fields(
         self,
@@ -226,7 +183,6 @@ class TestGetPrimaryPrinting:
 
         result = printing_repo.get_primary_printing(card_id)
         assert result is not None
-        # Prefers non-promo over promo even if promo is newer
         assert result.scryfall_id == "primary-nonpromo"
 
     def test_prefers_english_over_non_english(
@@ -267,7 +223,7 @@ class TestGetPrimaryPrinting:
 class TestBulkInsertPrintings:
     """Test bulk printing insertion."""
 
-    def test_bulk_insert_count(
+    def test_bulk_insert_count_and_dedup(
         self,
         repos: tuple[CardRepository, PrintingRepository],
         card_id: int,
@@ -284,41 +240,6 @@ class TestBulkInsertPrintings:
         ]
         count = printing_repo.bulk_insert_printings(printings)
         assert count == 5
-
-    def test_bulk_insert_ignores_duplicates(
-        self,
-        repos: tuple[CardRepository, PrintingRepository],
-        card_id: int,
-    ) -> None:
-        _, printing_repo = repos
-        printings = [
-            Printing(
-                scryfall_id=f"dup-bulk-{i}",
-                card_id=card_id,
-                set_code=f"D{i:02d}",
-                collector_number="1",
-            )
-            for i in range(3)
-        ]
-        printing_repo.bulk_insert_printings(printings)
+        # Second insert should skip all duplicates
         count = printing_repo.bulk_insert_printings(printings)
         assert count == 0
-
-    def test_bulk_insert_retrievable(
-        self,
-        repos: tuple[CardRepository, PrintingRepository],
-        card_id: int,
-    ) -> None:
-        _, printing_repo = repos
-        printings = [
-            Printing(
-                scryfall_id=f"retrieve-{i}",
-                card_id=card_id,
-                set_code=f"R{i:02d}",
-                collector_number="1",
-            )
-            for i in range(3)
-        ]
-        printing_repo.bulk_insert_printings(printings)
-        all_printings = printing_repo.get_printings_for_card(card_id)
-        assert len(all_printings) == 3

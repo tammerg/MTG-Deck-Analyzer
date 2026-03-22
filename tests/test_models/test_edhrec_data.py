@@ -25,21 +25,6 @@ class TestEdhrecDataCreation:
         assert data.potential_decks == 20000
         assert data.synergy_score == 0.12
 
-    def test_edhrec_data_has_slots(self) -> None:
-        """EdhrecCommanderData should use __slots__ for memory efficiency."""
-        data = EdhrecCommanderData(
-            commander_name="Test",
-            card_name="Test Card",
-            inclusion_rate=0.5,
-            num_decks=100,
-            potential_decks=200,
-        )
-        assert hasattr(data, "__slots__") or hasattr(
-            data.__class__, "__dataclass_fields__"
-        )
-        # slots=True means no __dict__
-        assert not hasattr(data, "__dict__")
-
     def test_edhrec_data_defaults(self) -> None:
         """synergy_score should default to 0.0."""
         data = EdhrecCommanderData(

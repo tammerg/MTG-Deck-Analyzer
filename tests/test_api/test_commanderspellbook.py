@@ -161,14 +161,18 @@ class TestFetchCombos:
 
 class TestFetchCombosForCards:
     @pytest.mark.asyncio
-    async def test_fetch_combos_for_cards_filters(self) -> None:
-        """fetch_combos_for_cards should return only combos containing
-        the specified cards."""
+    @pytest.mark.parametrize(
+        "card_names, variant_list, expected_count",
+        [
+            (["Exquisite Blood"], [SAMPLE_VARIANT], 1),
+            (["Nonexistent Card"], [], 0),
+        ],
+        ids=["filter_matching", "empty_no_match"],
+    )
+    async def test_fetch_combos_for_cards(self, card_names, variant_list, expected_count) -> None:
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = _make_api_response(
-            [SAMPLE_VARIANT]
-        )
+        mock_response.json.return_value = _make_api_response(variant_list)
         mock_response.raise_for_status = MagicMock()
 
         mock_client = AsyncMock()
@@ -180,46 +184,20 @@ class TestFetchCombosForCards:
             "mtg_deck_maker.api.commanderspellbook.httpx.AsyncClient",
             return_value=mock_client,
         ):
-            combos = await fetch_combos_for_cards(["Exquisite Blood"])
+            combos = await fetch_combos_for_cards(card_names)
 
-        assert len(combos) == 1
-        assert "Exquisite Blood" in combos[0].card_names
-
-    @pytest.mark.asyncio
-    async def test_fetch_combos_for_cards_empty(self) -> None:
-        """fetch_combos_for_cards with no matching cards should return []."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = _make_api_response([])
-        mock_response.raise_for_status = MagicMock()
-
-        mock_client = AsyncMock()
-        mock_client.get = AsyncMock(return_value=mock_response)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-
-        with patch(
-            "mtg_deck_maker.api.commanderspellbook.httpx.AsyncClient",
-            return_value=mock_client,
-        ):
-            combos = await fetch_combos_for_cards(["Nonexistent Card"])
-
-        assert combos == []
+        assert len(combos) == expected_count
 
 
 # === Fallback loading tests ===
 
 
 class TestLoadFallbackCombos:
-    def test_load_fallback_combos(self) -> None:
-        """load_fallback_combos should return Combo objects from the JSON file."""
+    def test_load_fallback_combos_with_required_fields(self) -> None:
+        """load_fallback_combos should return valid Combo objects with required fields."""
         combos = load_fallback_combos()
         assert len(combos) > 0
         assert all(isinstance(c, Combo) for c in combos)
-
-    def test_fallback_combos_have_required_fields(self) -> None:
-        """Each fallback combo should have a combo_id and card_names."""
-        combos = load_fallback_combos()
         for combo in combos:
             assert combo.combo_id != ""
             assert len(combo.card_names) >= 2

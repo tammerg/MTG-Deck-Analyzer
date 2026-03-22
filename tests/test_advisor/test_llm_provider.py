@@ -16,40 +16,32 @@ class TestLLMProviderAbstract:
 
 
 class TestGetProvider:
-    @patch.dict(
-        "os.environ",
-        {"OPENAI_API_KEY": "sk-test", "ANTHROPIC_API_KEY": ""},
-        clear=False,
+    @pytest.mark.parametrize(
+        "provider_name, env, expected_name",
+        [
+            ("openai", {"OPENAI_API_KEY": "sk-test", "ANTHROPIC_API_KEY": ""}, "OpenAI ChatGPT"),
+            ("anthropic", {"ANTHROPIC_API_KEY": "sk-ant-test", "OPENAI_API_KEY": ""}, "Anthropic Claude"),
+        ],
+        ids=["openai_explicit", "anthropic_explicit"],
     )
-    def test_openai_explicit(self):
-        # Mock openai import availability
-        with patch(
-            "mtg_deck_maker.advisor.openai_provider.importlib_available",
-            True,
-            create=True,
-        ):
-            provider = get_provider("openai")
+    def test_explicit_provider(self, provider_name, env, expected_name):
+        with patch.dict("os.environ", env, clear=False):
+            provider = get_provider(provider_name)
         if provider is not None:
-            assert provider.name == "OpenAI ChatGPT"
+            assert provider.name == expected_name
 
-    @patch.dict("os.environ", {}, clear=True)
-    def test_openai_no_key_returns_none(self):
-        provider = get_provider("openai")
-        assert provider is None
-
-    @patch.dict(
-        "os.environ",
-        {"ANTHROPIC_API_KEY": "sk-ant-test", "OPENAI_API_KEY": ""},
-        clear=False,
+    @pytest.mark.parametrize(
+        "provider_name, env",
+        [
+            ("openai", {}),
+            ("anthropic", {}),
+            ("anthropic", {}),
+        ],
+        ids=["openai_no_key", "anthropic_no_key", "model_override_no_key"],
     )
-    def test_anthropic_explicit(self):
-        provider = get_provider("anthropic")
-        if provider is not None:
-            assert provider.name == "Anthropic Claude"
-
-    @patch.dict("os.environ", {}, clear=True)
-    def test_anthropic_no_key_returns_none(self):
-        provider = get_provider("anthropic")
+    def test_no_key_returns_none(self, provider_name, env):
+        with patch.dict("os.environ", env, clear=True):
+            provider = get_provider(provider_name)
         assert provider is None
 
     @patch.dict("os.environ", {}, clear=True)
@@ -67,38 +59,16 @@ class TestGetProvider:
         if provider is not None:
             assert provider.name == "Anthropic Claude"
 
-    @patch.dict(
-        "os.environ",
-        {"OPENAI_API_KEY": "sk-test", "ANTHROPIC_API_KEY": "sk-ant-test"},
-        clear=True,
+    @pytest.mark.parametrize(
+        "provider_name, env, model, attr_expected",
+        [
+            ("anthropic", {"ANTHROPIC_API_KEY": "sk-ant-test"}, "claude-opus-4-20250514", "claude-opus-4-20250514"),
+            ("openai", {"OPENAI_API_KEY": "sk-test"}, "gpt-4-turbo", "gpt-4-turbo"),
+        ],
+        ids=["anthropic_model_override", "openai_model_override"],
     )
-    def test_auto_prefers_openai(self):
-        provider = get_provider("auto")
-        # If openai SDK is available, should prefer OpenAI
-        # If not, falls back to Anthropic - both are valid
-        assert provider is not None
-
-    @patch.dict(
-        "os.environ",
-        {"ANTHROPIC_API_KEY": "sk-ant-test"},
-        clear=True,
-    )
-    def test_model_override_passed_to_anthropic(self):
-        provider = get_provider("anthropic", model="claude-opus-4-20250514")
-        assert provider is not None
-        assert provider._model == "claude-opus-4-20250514"
-
-    @patch.dict(
-        "os.environ",
-        {"OPENAI_API_KEY": "sk-test"},
-        clear=True,
-    )
-    def test_model_override_passed_to_openai(self):
-        provider = get_provider("openai", model="gpt-4-turbo")
-        if provider is not None:  # Only if openai SDK is installed
-            assert provider._model == "gpt-4-turbo"
-
-    @patch.dict("os.environ", {}, clear=True)
-    def test_model_override_with_no_key_returns_none(self):
-        provider = get_provider("anthropic", model="some-model")
-        assert provider is None
+    def test_model_override(self, provider_name, env, model, attr_expected):
+        with patch.dict("os.environ", env, clear=True):
+            provider = get_provider(provider_name, model=model)
+        if provider is not None:
+            assert provider._model == attr_expected

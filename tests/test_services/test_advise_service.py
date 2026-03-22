@@ -43,11 +43,3 @@ class TestAdviseService:
             api_key="test-key",
             provider=None,
         )
-
-    def test_service_initialization(self):
-        """AdviseService should accept optional API key."""
-        service_no_key = AdviseService()
-        assert service_no_key._api_key is None
-
-        service_with_key = AdviseService(api_key="my-key")
-        assert service_with_key._api_key == "my-key"

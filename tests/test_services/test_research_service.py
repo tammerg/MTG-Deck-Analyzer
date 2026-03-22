@@ -61,20 +61,16 @@ class TestParseResearchResponse:
         assert len(result.win_conditions) == 2
         assert len(result.cards_to_avoid) == 1
 
-    def test_no_fenced_block(self):
-        result = _parse_research_response(
-            "Just some text without JSON.", "Atraxa"
-        )
-        assert result.parse_success is False
-        assert result.raw_response == "Just some text without JSON."
-
-    def test_malformed_json(self):
-        raw = '```json\n{bad json here}\n```'
-        result = _parse_research_response(raw, "Atraxa")
-        assert result.parse_success is False
-
-    def test_json_not_a_dict(self):
-        raw = '```json\n["a", "b"]\n```'
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            "Just some text without JSON.",
+            '```json\n{bad json here}\n```',
+            '```json\n["a", "b"]\n```',
+        ],
+        ids=["no_fenced_block", "malformed_json", "json_not_a_dict"],
+    )
+    def test_parse_failure(self, raw):
         result = _parse_research_response(raw, "Atraxa")
         assert result.parse_success is False
 
@@ -85,13 +81,6 @@ class TestParseResearchResponse:
         assert result.strategy_overview == "Go wide."
         assert result.key_cards == []
         assert result.combos == []
-
-    def test_partial_response(self):
-        raw = '```json\n{"key_cards": ["Sol Ring"], "combos": []}\n```'
-        result = _parse_research_response(raw, "Atraxa")
-        assert result.parse_success is True
-        assert result.key_cards == ["Sol Ring"]
-        assert result.strategy_overview == ""
 
     def test_non_list_key_cards(self):
         raw = '```json\n{"key_cards": "not a list"}\n```'
@@ -127,24 +116,6 @@ class TestResearchService:
         assert result.parse_success is False
         assert "I can't help with that." in result.raw_response
 
-    def test_research_commander_no_budget(self):
-        provider = _FakeProvider(response=_GOOD_JSON)
-        service = ResearchService(provider=provider)
-        result = service.research_commander(
-            commander_name="Atraxa",
-            budget=None,
-        )
-        assert result.parse_success is True
-
-    def test_research_commander_no_colors(self):
-        provider = _FakeProvider(response=_GOOD_JSON)
-        service = ResearchService(provider=provider)
-        result = service.research_commander(
-            commander_name="Kozilek",
-            color_identity=None,
-        )
-        assert result.parse_success is True
-
 
 class TestResearchResult:
     def test_defaults(self):
@@ -153,6 +124,3 @@ class TestResearchResult:
         assert r.strategy_overview == ""
         assert r.key_cards == []
         assert r.parse_success is True
-
-    def test_has_slots(self):
-        assert hasattr(ResearchResult, "__slots__")

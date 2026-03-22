@@ -95,9 +95,9 @@ These are known issues tracked for resolution. See PLAN.md for prioritized fix s
 | AC-1 | ~~CLI/API orchestration duplication~~ | ~~Medium~~ | **RESOLVED.** Extracted `BuildService.build_from_db()` — CLI and API are thin wrappers. |
 | AC-2 | ~~N+1 query explosion in web API~~ | ~~High~~ | **RESOLVED.** Added `get_cheapest_prices()` batch query with chunked IN clause (900/chunk). |
 | AC-3 | ~~Full table scan for color identity~~ | ~~High~~ | **RESOLVED.** SQL-level NOT LIKE exclusion filtering, no Python-side full scan. |
-| AC-4 | SSE streaming broken | Medium | Server-Sent Events for sync progress buffer all events until the sync completes, defeating the purpose of streaming. The sync runs synchronously in the main thread. |
-| AC-5 | Untyped dict threading for scored candidates | Low | Scored candidates are passed through the engine as plain dicts (`{"card": ..., "score": ..., "categories": ...}`) instead of typed dataclasses. |
-| AC-6 | Mixed sync/async in API clients | Low | EDHREC and CommanderSpellbook clients use `urllib.request` (sync) while the web API uses `httpx` (async). Inconsistent and blocks the event loop when called from async context. |
+| AC-4 | ~~SSE streaming broken~~ | ~~Medium~~ | **RESOLVED.** Queue bridge between sync thread and async SSE generator streams events in real time. |
+| AC-5 | ~~Untyped dict threading for scored candidates~~ | ~~Low~~ | **RESOLVED.** Introduced `ScoredCandidate` dataclass with slots, migrated engine and optimizer to attribute access. |
+| AC-6 | ~~Mixed sync/async in API clients~~ | ~~Low~~ | **RESOLVED.** Migrated EDHREC client from `urllib.request` to `httpx`. CommanderSpellbook still uses urllib (lower priority). |
 | AC-7 | ~~Dead code~~ | ~~Low~~ | **RESOLVED.** Removed legacy Anthropic path, unused `_assign_card_prices()`, stale imports. |
 
 ---

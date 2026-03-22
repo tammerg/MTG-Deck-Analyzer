@@ -47,7 +47,7 @@ src/mtg_deck_maker/
 | P1 Algorithm | Curve shaping, regex expansion (28 patterns), win conditions (20 patterns), redundancy awareness | Done |
 | Frontend | React 19 + Vite scaffolded, FastAPI web routers | In Progress |
 
-**Tests:** 765 passing, zero failures (1.87s full suite)
+**Tests:** 767 passing, zero failures (1.85s full suite)
 
 ---
 
@@ -66,12 +66,12 @@ src/mtg_deck_maker/
 - [x] **AC-2: Bulk price loading** — Added `get_cheapest_prices()` batch query with chunked IN clause (900/chunk)
 - [x] **AC-3: SQL-level color identity filtering** — Rewrote with NOT LIKE exclusion patterns in SQL
 - [x] **AC-1: Extract build orchestration** — Added `BuildService.build_from_db()`, CLI and API are thin wrappers
-- [ ] **AC-4: Fix SSE streaming** — In progress: queue bridge between sync thread and async SSE generator
+- [x] **AC-4: Fix SSE streaming** — Queue bridge between sync thread and async SSE generator
 
-### Priority 2: Code Quality — In Progress
+### Priority 2: Code Quality — DONE
 
-- [ ] **AC-5: ScoredCandidate dataclass** — In progress: replacing untyped dicts with typed dataclass
-- [ ] **AC-6: Standardize API clients** — In progress: migrating EDHREC/CommanderSpellbook from urllib to httpx
+- [x] **AC-5: ScoredCandidate dataclass** — Replaced untyped dicts with `ScoredCandidate` dataclass with slots
+- [x] **AC-6: Standardize API clients** — Migrated EDHREC client from urllib to httpx (CommanderSpellbook still urllib, lower priority)
 - [x] **AC-7: Remove dead code** — Done (part of P0 stabilization)
 
 ### Priority 3: Measurement Infrastructure

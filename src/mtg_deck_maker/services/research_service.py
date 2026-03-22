@@ -23,6 +23,7 @@ class ResearchResult:
     combos: list[str] = field(default_factory=list)
     win_conditions: list[str] = field(default_factory=list)
     cards_to_avoid: list[str] = field(default_factory=list)
+    category_targets: dict[str, tuple[int, int]] = field(default_factory=dict)
     raw_response: str = ""
     parse_success: bool = True
 
@@ -43,13 +44,37 @@ Respond with a JSON object inside a ```json fenced code block with these exact k
   "budget_staples": ["card1", "card2", ...],
   "combos": ["description1", "description2", ...],
   "win_conditions": ["win con 1", "win con 2", ...],
-  "cards_to_avoid": ["card1", "card2", ...]
+  "cards_to_avoid": ["card1", "card2", ...],
+  "category_targets": {{
+    "ramp": [min, max],
+    "card_draw": [min, max],
+    "removal": [min, max],
+    "board_wipe": [min, max],
+    "protection": [min, max],
+    "win_condition": [min, max]
+  }}
 }}
+
+Suggest optimal category target counts (min, max) for this specific commander's \
+strategy. Standard is 8-12 ramp, 8-10 draw, 5-7 removal, 2-4 board wipes, \
+3-5 protection, 7-10 win conditions. Adjust based on the commander's strategy.
 
 Limit key_cards to 15 max, budget_staples to 10 max, combos to 5 max.
 If unsure about a section, use an empty list."""
 
 _JSON_BLOCK_RE = re.compile(r"```json\s*\n(.*?)\n\s*```", re.DOTALL)
+
+_VALID_CATEGORIES = frozenset({
+    "ramp",
+    "card_draw",
+    "removal",
+    "board_wipe",
+    "counterspell",
+    "protection",
+    "recursion",
+    "win_condition",
+    "tutor",
+})
 
 
 def _parse_research_response(raw: str, commander_name: str) -> ResearchResult:
@@ -85,6 +110,7 @@ def _parse_research_response(raw: str, commander_name: str) -> ResearchResult:
     result.combos = _to_str_list(data.get("combos", []))
     result.win_conditions = _to_str_list(data.get("win_conditions", []))
     result.cards_to_avoid = _to_str_list(data.get("cards_to_avoid", []))
+    result.category_targets = _parse_category_targets(data.get("category_targets"))
 
     return result
 
@@ -94,6 +120,27 @@ def _to_str_list(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(item) for item in value]
+
+
+def _parse_category_targets(value: object) -> dict[str, tuple[int, int]]:
+    """Parse category_targets from LLM response JSON.
+
+    Expects a dict mapping category name to a two-element list of ints.
+    Filters to only valid category names and validates each entry.
+    Returns an empty dict on any top-level issue (not a dict, missing, etc.).
+    """
+    if not isinstance(value, dict):
+        return {}
+    targets: dict[str, tuple[int, int]] = {}
+    for key, val in value.items():
+        if key not in _VALID_CATEGORIES:
+            continue
+        if not isinstance(val, list) or len(val) != 2:
+            continue
+        if not isinstance(val[0], int) or not isinstance(val[1], int):
+            continue
+        targets[key] = (val[0], val[1])
+    return targets
 
 
 class ResearchService:

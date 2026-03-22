@@ -47,7 +47,7 @@ src/mtg_deck_maker/
 | P1 Algorithm | Curve shaping, regex expansion (28 patterns), win conditions (20 patterns), redundancy awareness | Done |
 | Frontend | React 19 + Vite scaffolded, FastAPI web routers | In Progress |
 
-**Tests:** 767 passing, zero failures (1.85s full suite)
+**Tests:** 875 passing, zero failures (1.93s full suite)
 
 ---
 
@@ -74,15 +74,16 @@ src/mtg_deck_maker/
 - [x] **AC-6: Standardize API clients** — Migrated EDHREC client from urllib to httpx (CommanderSpellbook still urllib, lower priority)
 - [x] **AC-7: Remove dead code** — Done (part of P0 stabilization)
 
-### Priority 3: Measurement Infrastructure
+### Priority 3: Measurement Infrastructure — DONE
 
 Build the tooling needed to validate algorithm changes. See [ALGORITHM_ROADMAP.md](./ALGORITHM_ROADMAP.md) for the full measurement plan.
 
-- [ ] `DeckComparison` tool — Generate two decks with different algorithm versions, compare metrics side-by-side
-- [ ] EDHREC overlap metric — % of selected cards appearing in EDHREC average decklist for that commander
-- [ ] Category coverage score — % of minimum category targets met
-- [ ] Mana curve smoothness metric — Standard deviation from ideal curve distribution
-- [ ] Benchmark suite — 5-10 commanders with golden reference decklists for regression testing
+- [x] Category coverage score — `metrics/category_coverage.py` (14 tests)
+- [x] Mana curve smoothness metric — `metrics/curve_smoothness.py` (17 tests)
+- [x] EDHREC overlap metric — `metrics/edhrec_overlap.py` (18 tests)
+- [x] Budget efficiency metric — `metrics/budget_efficiency.py` (19 tests)
+- [x] `DeckComparison` tool — `metrics/comparison.py` (19 tests)
+- [x] Benchmark suite — `metrics/benchmark.py`, 8 reference commanders with validation thresholds (21 tests)
 
 ### Priority 4: Algorithm Improvements (P2)
 

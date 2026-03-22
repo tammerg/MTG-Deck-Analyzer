@@ -45,9 +45,9 @@ src/mtg_deck_maker/
 | Phase 2.5 | Gap closure (CLI tests, model override, __init__ exports) | Done |
 | P0 Algorithm | Tribal matching, archetype-adaptive targets, combo DB, per-commander EDHREC | Done |
 | P1 Algorithm | Curve shaping, regex expansion (28 patterns), win conditions (20 patterns), redundancy awareness | Done |
-| Frontend | React 19 + Vite + all pages + FastAPI API layer | Mostly Done |
+| Frontend | React 19 + Vite + all pages + FastAPI API layer | Done |
 
-**Tests:** 942 passing, zero failures (1.97s full suite)
+**Tests:** 947 Python tests + 58 frontend tests passing, zero failures
 
 ---
 
@@ -94,7 +94,7 @@ All items from [ALGORITHM_ROADMAP.md](./ALGORITHM_ROADMAP.md) P2 tier:
 - [x] **W1b: LLM-assisted categorization** — `LLMCategorizer` in advisor/llm_categorizer.py: batched LLM categorization with validation (25 tests)
 - [x] **W4b: LLM-suggested category ratios** — `category_targets` in ResearchResult, LLM prompt extended (13 tests)
 
-### Priority 5: Frontend Implementation — Mostly Done
+### Priority 5: Frontend Implementation — DONE
 
 See [FRONTEND_PLAN.md](./FRONTEND_PLAN.md) for the complete 5-phase spec:
 
@@ -104,9 +104,9 @@ See [FRONTEND_PLAN.md](./FRONTEND_PLAN.md) for the complete 5-phase spec:
 - [x] LLM integration (research panel, smart build toggle, AdvisePanel)
 - [x] Polish (responsive design, loading skeletons, error boundaries, accessibility/aria)
 - [x] Backend API layer (FastAPI routers, Pydantic schemas, CORS middleware, SSE sync)
-- [ ] `mtg-deck serve` CLI command
-- [ ] Frontend tests (vitest + testing-library)
-- [ ] Code-splitting (bundle is 514KB)
+- [x] `mtg-deck serve` CLI command (uvicorn integration, --host/--port/--reload, 5 tests)
+- [x] Frontend tests (vitest + testing-library, 58 tests across utils + components)
+- [x] Code-splitting (lazy routes + vendor chunks, main bundle 192KB down from 514KB)
 
 ### Priority 6: Algorithm Improvements (P3)
 

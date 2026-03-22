@@ -7,10 +7,10 @@ without EDHREC data -- it just performs better with it).
 
 from __future__ import annotations
 
-import json
 import logging
 import re
-import urllib.request
+
+import httpx
 
 from mtg_deck_maker.models.edhrec_data import EdhrecCommanderData
 
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 EDHREC_BASE_URL = "https://json.edhrec.com/pages/commanders"
 USER_AGENT = "mtg-deck-maker/0.1.0"
-REQUEST_TIMEOUT = 15  # seconds
+REQUEST_TIMEOUT = 15.0  # seconds
 
 
 def _commander_name_to_slug(name: str) -> str:
@@ -44,7 +44,7 @@ def _commander_name_to_slug(name: str) -> str:
     return slug
 
 
-def fetch_commander_data(
+async def fetch_commander_data(
     commander_name: str,
 ) -> list[EdhrecCommanderData]:
     """Fetch per-commander card inclusion data from EDHREC.
@@ -63,13 +63,14 @@ def fetch_commander_data(
     url = f"{EDHREC_BASE_URL}/{slug}.json"
 
     try:
-        req = urllib.request.Request(
-            url,
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(REQUEST_TIMEOUT),
             headers={"User-Agent": USER_AGENT},
-        )
-        with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
-            raw = resp.read()
-            data = json.loads(raw)
+            follow_redirects=True,
+        ) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            data = response.json()
     except Exception:
         logger.warning(
             "Failed to fetch EDHREC data for %r from %s",

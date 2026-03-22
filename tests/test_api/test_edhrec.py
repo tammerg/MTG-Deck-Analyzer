@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -11,8 +10,6 @@ from mtg_deck_maker.api.edhrec import (
     _commander_name_to_slug,
     fetch_commander_data,
 )
-from mtg_deck_maker.models.edhrec_data import EdhrecCommanderData
-
 
 class TestCommanderNameToSlug:
     """Tests for the commander name to URL slug conversion."""
@@ -34,15 +31,8 @@ class TestCommanderNameToSlug:
 class TestFetchCommanderData:
     """Tests for fetching and parsing EDHREC commander data."""
 
-    def _mock_response(self, data: dict) -> MagicMock:
-        """Create a mock urllib response with JSON data."""
-        mock_resp = MagicMock()
-        mock_resp.read.return_value = json.dumps(data).encode("utf-8")
-        mock_resp.__enter__ = lambda s: s
-        mock_resp.__exit__ = MagicMock(return_value=False)
-        return mock_resp
-
-    def test_fetch_commander_data_success(self) -> None:
+    @pytest.mark.asyncio
+    async def test_fetch_commander_data_success(self) -> None:
         """Successful fetch should parse card data correctly."""
         mock_data = {
             "cardlists": [
@@ -79,10 +69,22 @@ class TestFetchCommanderData:
                 },
             ],
         }
-        mock_resp = self._mock_response(mock_data)
 
-        with patch("urllib.request.urlopen", return_value=mock_resp):
-            result = fetch_commander_data("Atraxa, Praetors' Voice")
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = mock_data
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch(
+            "mtg_deck_maker.api.edhrec.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            result = await fetch_commander_data("Atraxa, Praetors' Voice")
 
         assert len(result) == 3
         doubling = next(r for r in result if r.card_name == "Doubling Season")
@@ -96,24 +98,39 @@ class TestFetchCommanderData:
         assert sol_ring.inclusion_rate == 0.95
         assert sol_ring.synergy_score == -0.02
 
-    def test_fetch_commander_data_http_error(self) -> None:
+    @pytest.mark.asyncio
+    async def test_fetch_commander_data_http_error(self) -> None:
         """HTTP errors should return an empty list (graceful degradation)."""
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(side_effect=Exception("HTTP 404"))
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
         with patch(
-            "urllib.request.urlopen",
-            side_effect=Exception("HTTP 404"),
+            "mtg_deck_maker.api.edhrec.httpx.AsyncClient",
+            return_value=mock_client,
         ):
-            result = fetch_commander_data("Nonexistent Commander")
+            result = await fetch_commander_data("Nonexistent Commander")
 
         assert result == []
 
-    def test_fetch_commander_data_parse_error(self) -> None:
+    @pytest.mark.asyncio
+    async def test_fetch_commander_data_parse_error(self) -> None:
         """Malformed JSON should return an empty list."""
-        mock_resp = MagicMock()
-        mock_resp.read.return_value = b"not valid json{{"
-        mock_resp.__enter__ = lambda s: s
-        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.side_effect = ValueError("Invalid JSON")
 
-        with patch("urllib.request.urlopen", return_value=mock_resp):
-            result = fetch_commander_data("Some Commander")
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch(
+            "mtg_deck_maker.api.edhrec.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            result = await fetch_commander_data("Some Commander")
 
         assert result == []

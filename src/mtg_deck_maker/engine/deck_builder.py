@@ -17,8 +17,9 @@ from mtg_deck_maker.engine.categories import Category, categorize_card
 from mtg_deck_maker.engine.mana_base import build_mana_base, calculate_land_count
 from mtg_deck_maker.engine.synergy import compute_combo_synergy, compute_synergy
 from mtg_deck_maker.models.card import Card
-from mtg_deck_maker.models.commander import Commander, CommanderValidationError
+from mtg_deck_maker.models.commander import Commander
 from mtg_deck_maker.models.deck import Deck, DeckCard
+from mtg_deck_maker.models.scored_candidate import ScoredCandidate
 from mtg_deck_maker.utils.colors import is_within_identity
 
 
@@ -387,10 +388,10 @@ def build_deck(
     # Shuffle with seed for tie-breaking determinism
     rng.shuffle(candidates)
     # Re-sort by score (stable sort preserves shuffle order for ties)
-    candidates.sort(key=lambda c: c["score"], reverse=True)
+    candidates.sort(key=lambda c: c.score, reverse=True)
 
     # Filter out lands (handled separately in mana base)
-    nonland_candidates = [c for c in candidates if not c["card"].is_land]
+    nonland_candidates = [c for c in candidates if not c.card.is_land]
 
     # Select non-land cards using budget optimizer
     # Reserve budget portion for lands (estimate ~$0.25 per basic land)
@@ -420,7 +421,7 @@ def build_deck(
 
     if len(selected) > nonland_card_count:
         # Trim lowest-scored cards
-        selected.sort(key=lambda c: c["score"], reverse=True)
+        selected.sort(key=lambda c: c.score, reverse=True)
         selected = selected[:nonland_card_count]
 
     # Step 9: Build mana base
@@ -513,8 +514,8 @@ def _build_scored_candidates(
     priority_cards: list[str] | None = None,
     edhrec_inclusion: dict[str, float] | None = None,
     combo_partners: dict[str, list[str]] | None = None,
-) -> list[dict]:
-    """Build scored candidate dicts for the budget optimizer.
+) -> list[ScoredCandidate]:
+    """Build scored candidates for the budget optimizer.
 
     Args:
         cards: Filtered card pool.
@@ -530,9 +531,9 @@ def _build_scored_candidates(
             combo partner card names for combo synergy scoring.
 
     Returns:
-        List of candidate dicts with card, score, price, and category info.
+        List of ScoredCandidate objects with card, score, price, and category info.
     """
-    candidates: list[dict] = []
+    candidates: list[ScoredCandidate] = []
     priority_set = {n.lower() for n in (priority_cards or [])}
     priority_bonus = config.llm.priority_bonus
 
@@ -573,22 +574,22 @@ def _build_scored_candidates(
             )
             final_score += combo_bonus * priority_bonus * 0.5
 
-        candidates.append({
-            "card": card,
-            "card_id": card.id if card.id is not None else id(card),
-            "score": final_score,
-            "price": price,
-            "category": primary_cat,
-            "synergy": synergy,
-            "power": power,
-        })
+        candidates.append(ScoredCandidate(
+            card=card,
+            card_id=card.id if card.id is not None else id(card),
+            score=final_score,
+            price=price,
+            category=primary_cat,
+            synergy=synergy,
+            power=power,
+        ))
 
     return candidates
 
 
 def _fill_remaining_slots(
-    selected: list[dict],
-    all_candidates: list[dict],
+    selected: list[ScoredCandidate],
+    all_candidates: list[ScoredCandidate],
     target_count: int,
 ) -> None:
     """Fill remaining deck slots from unused candidates.
@@ -596,23 +597,23 @@ def _fill_remaining_slots(
     Modifies selected list in-place.
 
     Args:
-        selected: Currently selected cards.
+        selected: Currently selected candidates.
         all_candidates: All available candidates.
         target_count: Target number of cards to select.
     """
-    selected_ids = {c["card_id"] for c in selected}
+    selected_ids = {c.card_id for c in selected}
 
     for cand in all_candidates:
         if len(selected) >= target_count:
             break
-        if cand["card_id"] not in selected_ids:
+        if cand.card_id not in selected_ids:
             selected.append(cand)
-            selected_ids.add(cand["card_id"])
+            selected_ids.add(cand.card_id)
 
 
 def _assemble_deck(
     commander: Commander,
-    selected_nonlands: list[dict],
+    selected_nonlands: list[ScoredCandidate],
     mana_base: list[Card],
     prices: dict[int, float],
     budget: float,
@@ -621,7 +622,7 @@ def _assemble_deck(
 
     Args:
         commander: The commander configuration.
-        selected_nonlands: Selected non-land candidate dicts.
+        selected_nonlands: Selected ScoredCandidate objects.
         mana_base: List of land Cards from mana base builder.
         prices: Price mapping.
         budget: Budget target.
@@ -660,16 +661,16 @@ def _assemble_deck(
 
     # Add selected nonland cards
     for cand in selected_nonlands:
-        card = cand["card"]
+        card = cand.card
         deck_cards.append(DeckCard(
             card_id=card.id if card.id is not None else 0,
             quantity=1,
-            category=cand["category"],
+            category=cand.category,
             is_commander=False,
             card_name=card.name,
             cmc=card.cmc,
             colors=list(card.colors),
-            price=cand["price"],
+            price=cand.price,
         ))
 
     # Add lands from mana base

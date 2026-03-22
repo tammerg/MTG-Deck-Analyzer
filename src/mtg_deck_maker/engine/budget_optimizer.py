@@ -8,6 +8,9 @@ from __future__ import annotations
 
 import math
 import re
+from dataclasses import replace
+
+from mtg_deck_maker.models.scored_candidate import ScoredCandidate
 
 
 def score_card(synergy: float, power: float, price: float) -> float:
@@ -250,21 +253,14 @@ def _get_cmc_bucket(card: object) -> int:
 
 
 def optimize_for_budget(
-    candidates: list[dict],
+    candidates: list[ScoredCandidate],
     budget: float,
     category_targets: dict[str, tuple[int, int]],
     ideal_curve: dict[int, float] | None = None,
     total_nonland_target: int = 0,
     card_texts: dict[int, str] | None = None,
-) -> list[dict]:
+) -> list[ScoredCandidate]:
     """Select cards from candidates to fill category targets within budget.
-
-    Each candidate dict must have keys:
-        - "card": the Card object
-        - "card_id": int identifier
-        - "score": float final score (from score_card)
-        - "price": float price in USD
-        - "category": str primary category assignment
 
     Category targets map category name to (min_count, max_count) tuples.
     Soft budget caps mean individual categories can exceed their max if
@@ -289,7 +285,7 @@ def optimize_for_budget(
           already-selected cards.
 
     Args:
-        candidates: List of candidate dicts with card info and scores.
+        candidates: List of ScoredCandidate objects.
         budget: Total budget in USD.
         category_targets: Dict mapping category -> (min, max) counts.
         ideal_curve: Optional dict mapping CMC bucket -> ideal percentage
@@ -301,7 +297,7 @@ def optimize_for_budget(
             functional duplicate detection.
 
     Returns:
-        List of selected candidate dicts within (or near) budget.
+        List of selected ScoredCandidate objects within (or near) budget.
     """
     if not candidates:
         return []
@@ -313,39 +309,35 @@ def optimize_for_budget(
     # Track oracle texts of selected cards for duplicate detection
     selected_texts: list[str] = []
 
-    def _track_selected(cand: dict) -> None:
+    def _track_selected(cand: ScoredCandidate) -> None:
         """Update tracking state after selecting a card."""
-        cat = cand["category"]
-        category_counts[cat] = category_counts.get(cat, 0) + 1
+        category_counts[cand.category] = category_counts.get(cand.category, 0) + 1
         if card_texts is not None:
-            cid = cand["card_id"]
-            text = card_texts.get(cid, "")
+            text = card_texts.get(cand.card_id, "")
             if text:
                 selected_texts.append(text)
 
-    def _compute_adjusted_score(cand: dict) -> float:
+    def _compute_adjusted_score(cand: ScoredCandidate) -> float:
         """Compute a candidate's score with all applicable penalties."""
-        adjusted = cand["score"]
+        adjusted = cand.score
 
         # Apply curve penalty
-        if use_curve:
+        if use_curve and ideal_curve is not None:
             curve_pen = compute_curve_penalty(
-                cand["card"].cmc, current_curve, ideal_curve,
+                cand.card.cmc, current_curve, ideal_curve,
                 total_nonland_target,
             )
             adjusted *= curve_pen
 
         # Apply diminishing returns penalty
-        cat = cand["category"]
         dim_pen = compute_diminishing_penalty(
-            cat, category_counts, category_targets,
+            cand.category, category_counts, category_targets,
         )
         adjusted *= dim_pen
 
         # Apply duplicate penalty
         if card_texts is not None and selected_texts:
-            cid = cand["card_id"]
-            cand_text = card_texts.get(cid, "")
+            cand_text = card_texts.get(cand.card_id, "")
             if cand_text:
                 dup_pen = compute_duplicate_penalty(
                     cand_text, selected_texts,
@@ -355,17 +347,16 @@ def optimize_for_budget(
         return adjusted
 
     # Group candidates by category, sorted by score descending
-    by_category: dict[str, list[dict]] = {}
+    by_category: dict[str, list[ScoredCandidate]] = {}
     for cand in candidates:
-        cat = cand["category"]
-        if cat not in by_category:
-            by_category[cat] = []
-        by_category[cat].append(cand)
+        if cand.category not in by_category:
+            by_category[cand.category] = []
+        by_category[cand.category].append(cand)
 
     for cat in by_category:
-        by_category[cat].sort(key=lambda c: c["score"], reverse=True)
+        by_category[cat].sort(key=lambda c: c.score, reverse=True)
 
-    selected: list[dict] = []
+    selected: list[ScoredCandidate] = []
     selected_ids: set[int] = set()
     total_cost = 0.0
 
@@ -373,15 +364,15 @@ def optimize_for_budget(
     for cat, (min_count, _max_count) in category_targets.items():
         cat_candidates = by_category.get(cat, [])
         # When using curve shaping, re-sort by curve-adjusted score
-        if use_curve:
+        if use_curve and ideal_curve is not None:
             scored_cands = []
             for cand in cat_candidates:
                 penalty = compute_curve_penalty(
-                    cand["card"].cmc, current_curve, ideal_curve, total_nonland_target
+                    cand.card.cmc, current_curve, ideal_curve, total_nonland_target
                 )
                 # Softer penalty in Phase 1: floor at 0.5
                 soft_penalty = max(penalty, 0.5)
-                scored_cands.append((cand["score"] * soft_penalty, cand))
+                scored_cands.append((cand.score * soft_penalty, cand))
             scored_cands.sort(key=lambda x: x[0], reverse=True)
             ordered = [c for _, c in scored_cands]
         else:
@@ -391,26 +382,25 @@ def optimize_for_budget(
         for cand in ordered:
             if filled >= min_count:
                 break
-            cid = cand["card_id"]
-            if cid in selected_ids:
+            if cand.card_id in selected_ids:
                 continue
             selected.append(cand)
-            selected_ids.add(cid)
-            total_cost += cand["price"]
+            selected_ids.add(cand.card_id)
+            total_cost += cand.price
             _track_selected(cand)
             filled += 1
             if use_curve:
-                bucket = _get_cmc_bucket(cand["card"])
+                bucket = _get_cmc_bucket(cand.card)
                 current_curve[bucket] = current_curve.get(bucket, 0) + 1
 
     # Phase 2: Fill up to max targets where budget allows
     for cat, (_min_count, max_count) in category_targets.items():
         cat_candidates = by_category.get(cat, [])
-        cat_selected = sum(1 for s in selected if s["category"] == cat)
+        cat_selected = sum(1 for s in selected if s.category == cat)
 
         # Build available list of unselected candidates
         available = [
-            c for c in cat_candidates if c["card_id"] not in selected_ids
+            c for c in cat_candidates if c.card_id not in selected_ids
         ]
 
         while cat_selected < max_count and available:
@@ -421,25 +411,24 @@ def optimize_for_budget(
             scored.sort(key=lambda x: x[1], reverse=True)
             best_cand, _best_score = scored[0]
 
-            cid = best_cand["card_id"]
             # Soft cap: allow if total stays within budget
-            if total_cost + best_cand["price"] > budget:
+            if total_cost + best_cand.price > budget:
                 available.remove(best_cand)
                 continue
 
             selected.append(best_cand)
-            selected_ids.add(cid)
-            total_cost += best_cand["price"]
+            selected_ids.add(best_cand.card_id)
+            total_cost += best_cand.price
             _track_selected(best_cand)
             cat_selected += 1
             available.remove(best_cand)
             if use_curve:
-                bucket = _get_cmc_bucket(best_cand["card"])
+                bucket = _get_cmc_bucket(best_cand.card)
                 current_curve[bucket] = current_curve.get(bucket, 0) + 1
 
     # Phase 3: Backfill underfilled categories from unselected candidates
     for cat, (min_count, _max_count) in category_targets.items():
-        cat_selected = sum(1 for s in selected if s["category"] == cat)
+        cat_selected = sum(1 for s in selected if s.category == cat)
         deficit = min_count - cat_selected
         if deficit <= 0:
             continue
@@ -447,7 +436,7 @@ def optimize_for_budget(
         # Look through all unselected candidates sorted by adjusted score
         all_unselected = [
             c for c in candidates
-            if c["card_id"] not in selected_ids
+            if c.card_id not in selected_ids
         ]
         # Score with penalties
         scored_unselected = [
@@ -458,15 +447,13 @@ def optimize_for_budget(
         for cand, _adj_score in scored_unselected:
             if deficit <= 0:
                 break
-            cid = cand["card_id"]
-            if cid in selected_ids:
+            if cand.card_id in selected_ids:
                 continue
             # Re-assign to the deficit category
-            reassigned = dict(cand)
-            reassigned["category"] = cat
+            reassigned = replace(cand, category=cat)
             selected.append(reassigned)
-            selected_ids.add(cid)
-            total_cost += cand["price"]
+            selected_ids.add(cand.card_id)
+            total_cost += cand.price
             _track_selected(reassigned)
             deficit -= 1
 
@@ -478,9 +465,9 @@ def optimize_for_budget(
 
 
 def _swap_for_cheaper(
-    selected: list[dict],
+    selected: list[ScoredCandidate],
     selected_ids: set[int],
-    all_candidates: list[dict],
+    all_candidates: list[ScoredCandidate],
     budget: float,
 ) -> None:
     """Swap expensive low-scored cards for cheaper alternatives in-place.
@@ -490,9 +477,9 @@ def _swap_for_cheaper(
     or no more swaps are possible.
 
     Args:
-        selected: List of selected candidate dicts (modified in-place).
+        selected: List of selected ScoredCandidates (modified in-place).
         selected_ids: Set of selected card IDs (modified in-place).
-        all_candidates: Full list of candidate dicts to draw replacements from.
+        all_candidates: Full list of ScoredCandidates to draw replacements from.
         budget: Target budget in USD.
     """
     max_iterations = len(selected) * 2
@@ -500,45 +487,43 @@ def _swap_for_cheaper(
 
     while iteration < max_iterations:
         iteration += 1
-        total_cost = sum(c["price"] for c in selected)
+        total_cost = sum(c.price for c in selected)
         if total_cost <= budget:
             break
 
         overage = total_cost - budget
 
         # Find the lowest-scored selected card
-        selected.sort(key=lambda c: c["score"])
+        selected.sort(key=lambda c: c.score)
         swapped = False
 
         for i, worst in enumerate(selected):
             # Find a cheaper unselected alternative
             alternatives = [
                 c for c in all_candidates
-                if c["card_id"] not in selected_ids
-                and c["price"] < worst["price"]
-                and c["price"] <= worst["price"] - (overage * 0.1)
+                if c.card_id not in selected_ids
+                and c.price < worst.price
+                and c.price <= worst.price - (overage * 0.1)
             ]
             if not alternatives:
                 # Try any cheaper card
                 alternatives = [
                     c for c in all_candidates
-                    if c["card_id"] not in selected_ids
-                    and c["price"] < worst["price"]
+                    if c.card_id not in selected_ids
+                    and c.price < worst.price
                 ]
             if not alternatives:
                 continue
 
             # Pick the highest scored cheap alternative
-            alternatives.sort(key=lambda c: c["score"], reverse=True)
+            alternatives.sort(key=lambda c: c.score, reverse=True)
             replacement = alternatives[0]
 
             # Perform swap
-            selected_ids.discard(worst["card_id"])
-            selected_ids.add(replacement["card_id"])
+            selected_ids.discard(worst.card_id)
+            selected_ids.add(replacement.card_id)
             # Preserve category assignment
-            new_entry = dict(replacement)
-            new_entry["category"] = worst["category"]
-            selected[i] = new_entry
+            selected[i] = replace(replacement, category=worst.category)
             swapped = True
             break
 
@@ -546,5 +531,5 @@ def _swap_for_cheaper(
             # No beneficial swaps possible; remove the cheapest low-scored card
             if selected:
                 removed = selected.pop(0)
-                selected_ids.discard(removed["card_id"])
+                selected_ids.discard(removed.card_id)
             break

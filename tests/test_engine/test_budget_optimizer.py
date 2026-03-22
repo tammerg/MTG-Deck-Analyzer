@@ -13,10 +13,11 @@ from mtg_deck_maker.engine.budget_optimizer import (
     score_card,
 )
 from mtg_deck_maker.models.card import Card
+from mtg_deck_maker.models.scored_candidate import ScoredCandidate
 
 
 # ---------------------------------------------------------------------------
-# Helper: build a minimal candidate dict for budget optimizer
+# Helper: build a minimal ScoredCandidate for budget optimizer
 # ---------------------------------------------------------------------------
 
 def _make_candidate(
@@ -25,8 +26,8 @@ def _make_candidate(
     score: float,
     price: float,
     category: str,
-) -> dict:
-    """Create a candidate dict matching the optimize_for_budget contract."""
+) -> ScoredCandidate:
+    """Create a ScoredCandidate matching the optimize_for_budget contract."""
     card = Card(
         oracle_id=f"oracle-{card_id}",
         name=name,
@@ -40,13 +41,13 @@ def _make_candidate(
         legal_commander=True,
         id=card_id,
     )
-    return {
-        "card": card,
-        "card_id": card_id,
-        "score": score,
-        "price": price,
-        "category": category,
-    }
+    return ScoredCandidate(
+        card=card,
+        card_id=card_id,
+        score=score,
+        price=price,
+        category=category,
+    )
 
 
 # ===========================================================================
@@ -105,7 +106,7 @@ class TestOptimizeForBudget:
         ]
         targets = {"ramp": (5, 8)}
         result = optimize_for_budget(candidates, 100.0, targets)
-        ramp_count = sum(1 for c in result if c["category"] == "ramp")
+        ramp_count = sum(1 for c in result if c.category == "ramp")
         assert ramp_count >= 5
 
     def test_budget_compliance(self):
@@ -114,7 +115,7 @@ class TestOptimizeForBudget:
             for i in range(1, 51)
         ]
         result = optimize_for_budget(candidates, 20.0, {"ramp": (3, 10)})
-        assert sum(c["price"] for c in result) <= 20.0
+        assert sum(c.price for c in result) <= 20.0
 
     def test_multiple_categories_filled(self):
         candidates = []
@@ -135,7 +136,7 @@ class TestOptimizeForBudget:
 
         cat_counts: dict[str, int] = {}
         for c in result:
-            cat_counts[c["category"]] = cat_counts.get(c["category"], 0) + 1
+            cat_counts[c.category] = cat_counts.get(c.category, 0) + 1
 
         assert cat_counts.get("ramp", 0) >= 3
         assert cat_counts.get("card_draw", 0) >= 3
@@ -147,7 +148,7 @@ class TestOptimizeForBudget:
             for i in range(1, 21)
         ]
         result = optimize_for_budget(candidates, 100.0, {"ramp": (5, 10)})
-        card_ids = [c["card_id"] for c in result]
+        card_ids = [c.card_id for c in result]
         assert len(card_ids) == len(set(card_ids)), "Duplicate card IDs found"
 
 
@@ -163,8 +164,8 @@ def _make_candidate_with_cmc(
     price: float,
     category: str,
     cmc: float,
-) -> dict:
-    """Create a candidate dict with a specific CMC for curve shaping tests."""
+) -> ScoredCandidate:
+    """Create a ScoredCandidate with a specific CMC for curve shaping tests."""
     card = Card(
         oracle_id=f"oracle-{card_id}",
         name=name,
@@ -178,13 +179,13 @@ def _make_candidate_with_cmc(
         legal_commander=True,
         id=card_id,
     )
-    return {
-        "card": card,
-        "card_id": card_id,
-        "score": score,
-        "price": price,
-        "category": category,
-    }
+    return ScoredCandidate(
+        card=card,
+        card_id=card_id,
+        score=score,
+        price=price,
+        category=category,
+    )
 
 
 class TestCurvePenalty:

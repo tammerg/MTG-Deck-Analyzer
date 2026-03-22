@@ -6,6 +6,7 @@ from mtg_deck_maker.models.commander import Commander
 from mtg_deck_maker.models.deck import Deck, DeckCard
 from mtg_deck_maker.models.edhrec_data import EdhrecCommanderData
 from mtg_deck_maker.models.printing import Printing
+from mtg_deck_maker.models.scored_candidate import ScoredCandidate
 
 __all__ = [
     "Card",
@@ -15,4 +16,5 @@ __all__ = [
     "DeckCard",
     "EdhrecCommanderData",
     "Printing",
+    "ScoredCandidate",
 ]

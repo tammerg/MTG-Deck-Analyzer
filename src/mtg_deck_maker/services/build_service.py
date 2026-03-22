@@ -273,7 +273,9 @@ class BuildService:
                 cmd_name = cmd_card.name
                 if not edhrec_repo.has_data(cmd_name) or edhrec_repo.is_stale(cmd_name):
                     _progress("Fetching EDHREC data...")
-                    edhrec_data = fetch_commander_data(cmd_name)
+                    import asyncio
+
+                    edhrec_data = asyncio.run(fetch_commander_data(cmd_name))
                     if edhrec_data:
                         edhrec_repo.upsert_data(edhrec_data)
                         _progress(f"Cached {len(edhrec_data)} EDHREC cards for {cmd_name}")

@@ -6,11 +6,13 @@ and over-budget swap optimization to produce decks within total budget.
 
 from __future__ import annotations
 
+import collections
 import math
 import re
 from dataclasses import replace
 
 from mtg_deck_maker.models.scored_candidate import ScoredCandidate
+from mtg_deck_maker.utils.text import REMINDER_TEXT_RE
 
 
 def score_card(synergy: float, power: float, price: float) -> float:
@@ -127,9 +129,6 @@ def compute_diminishing_penalty(
     return 0.5 ** (current_count - max_target + 1)
 
 
-# Regex to strip reminder text (text in parentheses)
-_REMINDER_TEXT_RE = re.compile(r"\([^)]*\)")
-
 # Common MTG words to exclude from functional keyword extraction
 _COMMON_MTG_WORDS = frozenset({
     "target", "creature", "you", "the", "your", "this", "that",
@@ -158,7 +157,7 @@ def _extract_functional_tokens(oracle_text: str) -> set[str]:
         return set()
 
     # Strip reminder text
-    cleaned = _REMINDER_TEXT_RE.sub("", oracle_text)
+    cleaned = REMINDER_TEXT_RE.sub("", oracle_text)
 
     # Tokenize: lowercase, extract word tokens of 3+ characters
     words = re.findall(r"[a-z]{3,}", cleaned.lower())
@@ -387,10 +386,8 @@ def optimize_for_budget(
         return adjusted
 
     # Group candidates by category, sorted by score descending
-    by_category: dict[str, list[ScoredCandidate]] = {}
+    by_category: dict[str, list[ScoredCandidate]] = collections.defaultdict(list)
     for cand in candidates:
-        if cand.category not in by_category:
-            by_category[cand.category] = []
         by_category[cand.category].append(cand)
 
     for cat in by_category:
@@ -436,14 +433,21 @@ def optimize_for_budget(
     # Phase 2: Fill up to max targets where budget allows
     for cat, (_min_count, max_count) in category_targets.items():
         cat_candidates = by_category.get(cat, [])
-        cat_selected = sum(1 for s in selected if s.category == cat)
+        # Use already-maintained category_counts dict — O(1) instead of O(n)
+        cat_selected = category_counts.get(cat, 0)
 
-        # Build available list of unselected candidates
-        available = [
-            c for c in cat_candidates if c.card_id not in selected_ids
-        ]
+        # Track IDs to skip using a set — avoids O(n) list.remove calls
+        phase2_skip: set[int] = set()
 
-        while cat_selected < max_count and available:
+        while cat_selected < max_count:
+            # Build available list excluding already-selected and skipped IDs
+            available = [
+                c for c in cat_candidates
+                if c.card_id not in selected_ids and c.card_id not in phase2_skip
+            ]
+            if not available:
+                break
+
             # Re-score with all penalties and pick the best
             scored = [
                 (c, _compute_adjusted_score(c)) for c in available
@@ -453,7 +457,7 @@ def optimize_for_budget(
 
             # Soft cap: allow if total stays within budget
             if total_cost + best_cand.price > budget:
-                available.remove(best_cand)
+                phase2_skip.add(best_cand.card_id)
                 continue
 
             selected.append(best_cand)
@@ -461,14 +465,14 @@ def optimize_for_budget(
             total_cost += best_cand.price
             _track_selected(best_cand)
             cat_selected += 1
-            available.remove(best_cand)
             if use_curve:
                 bucket = _get_cmc_bucket(best_cand.card)
                 current_curve[bucket] = current_curve.get(bucket, 0) + 1
 
     # Phase 3: Backfill underfilled categories from unselected candidates
     for cat, (min_count, _max_count) in category_targets.items():
-        cat_selected = sum(1 for s in selected if s.category == cat)
+        # Use already-maintained category_counts dict — O(1) instead of O(n)
+        cat_selected = category_counts.get(cat, 0)
         deficit = min_count - cat_selected
         if deficit <= 0:
             continue
@@ -524,10 +528,10 @@ def _swap_for_cheaper(
     """
     max_iterations = len(selected) * 2
     iteration = 0
+    total_cost = sum(c.price for c in selected)
 
     while iteration < max_iterations:
         iteration += 1
-        total_cost = sum(c.price for c in selected)
         if total_cost <= budget:
             break
 
@@ -559,7 +563,8 @@ def _swap_for_cheaper(
             alternatives.sort(key=lambda c: c.score, reverse=True)
             replacement = alternatives[0]
 
-            # Perform swap
+            # Perform swap — update running total instead of re-summing
+            total_cost = total_cost - worst.price + replacement.price
             selected_ids.discard(worst.card_id)
             selected_ids.add(replacement.card_id)
             # Preserve category assignment
@@ -572,4 +577,5 @@ def _swap_for_cheaper(
             if selected:
                 removed = selected.pop(0)
                 selected_ids.discard(removed.card_id)
+                total_cost -= removed.price
             break

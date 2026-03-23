@@ -10,6 +10,7 @@ import re
 from enum import Enum
 
 from mtg_deck_maker.models.card import Card
+from mtg_deck_maker.utils.text import REMINDER_TEXT_RE
 
 
 class Category(str, Enum):
@@ -31,10 +32,6 @@ class Category(str, Enum):
     UTILITY = "utility"
 
 
-# Regex for reminder text: text enclosed in parentheses
-_REMINDER_TEXT_RE = re.compile(r"\([^)]*\)")
-
-
 def _strip_reminder_text(text: str) -> str:
     """Remove reminder text (parenthesized text) from oracle text.
 
@@ -44,7 +41,7 @@ def _strip_reminder_text(text: str) -> str:
     Returns:
         Oracle text with reminder text removed.
     """
-    return _REMINDER_TEXT_RE.sub("", text)
+    return REMINDER_TEXT_RE.sub("", text)
 
 
 # Category detection rules: list of (pattern, confidence) tuples per category.

@@ -7,6 +7,7 @@ mana base construction, and final validation.
 
 from __future__ import annotations
 
+import logging
 import random
 import re
 from enum import Enum
@@ -19,8 +20,11 @@ from mtg_deck_maker.engine.synergy import compute_combo_synergy, compute_synergy
 from mtg_deck_maker.models.card import Card
 from mtg_deck_maker.models.commander import Commander
 from mtg_deck_maker.models.deck import Deck, DeckCard
+from mtg_deck_maker.models.protocols import PowerPredictorProtocol
 from mtg_deck_maker.models.scored_candidate import ScoredCandidate
 from mtg_deck_maker.utils.colors import is_within_identity
+
+logger = logging.getLogger(__name__)
 
 
 class DeckBuildError(Exception):
@@ -125,7 +129,6 @@ IDEAL_CURVE: dict[str, dict[int, float]] = {
 
 # Synergy and flex categories get the remainder
 SYNERGY_TARGET: tuple[int, int] = (8, 12)
-FLEX_CATEGORY = "flex"
 
 
 # Archetype detection patterns
@@ -139,8 +142,9 @@ _SPELLSLINGER_PATTERNS: list[re.Pattern[str]] = [
 
 _COMBO_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"search your library", re.IGNORECASE),
-    re.compile(r"\binfinite\b", re.IGNORECASE),
-    re.compile(r"untap all", re.IGNORECASE),
+    re.compile(r"\buntap all\b", re.IGNORECASE),
+    re.compile(r"\beach opponent loses\b", re.IGNORECASE),
+    re.compile(r"\bstorm\b", re.IGNORECASE),
 ]
 
 _AGGRO_PATTERNS: list[re.Pattern[str]] = [
@@ -273,7 +277,7 @@ def build_deck(
     edhrec_inclusion: dict[str, float] | None = None,
     combo_partners: dict[str, list[str]] | None = None,
     llm_synergy_matrix: dict[tuple[str, str], float] | None = None,
-    power_predictor: object | None = None,
+    power_predictor: PowerPredictorProtocol | None = None,
 ) -> Deck:
     """Build a complete 100-card Commander deck from a card pool.
 
@@ -302,6 +306,14 @@ def build_deck(
             mapping card name -> inclusion rate (0.0 to 1.0).
         combo_partners: Optional mapping of card name to list of known
             combo partner card names for combo synergy scoring.
+        llm_synergy_matrix: Optional dict mapping (card_a, card_b) tuples
+            to a synergy score (0.0 to 1.0) produced by an LLM. Used
+            during budget optimization to boost co-selection of high-
+            synergy pairs.
+        power_predictor: Optional ML model implementing
+            ``PowerPredictorProtocol``. When provided, replaces the
+            generic EDHREC rank normalization with a per-commander
+            predicted power score for each candidate card.
 
     Returns:
         A fully constructed Deck object with exactly 100 cards.
@@ -367,7 +379,6 @@ def build_deck(
         cat_names = {c for c, _ in cats}
         if Category.RAMP.value in cat_names and not card.is_land:
             estimated_ramp += 1
-    estimated_ramp = min(estimated_ramp, 15)
 
     avg_cmc_estimate = _estimate_avg_cmc(filtered_pool)
     num_lands = calculate_land_count(
@@ -519,7 +530,7 @@ def _build_scored_candidates(
     priority_cards: list[str] | None = None,
     edhrec_inclusion: dict[str, float] | None = None,
     combo_partners: dict[str, list[str]] | None = None,
-    power_predictor: object | None = None,
+    power_predictor: PowerPredictorProtocol | None = None,
     commander_card: Card | None = None,
 ) -> list[ScoredCandidate]:
     """Build scored candidates for the budget optimizer.
@@ -559,8 +570,9 @@ def _build_scored_candidates(
         ml_prediction = None
         if power_predictor is not None and commander_card is not None:
             try:
-                ml_prediction = power_predictor.predict(card, commander_card)  # type: ignore[attr-defined]
-            except Exception:
+                ml_prediction = power_predictor.predict(card, commander_card)
+            except Exception as exc:
+                logger.debug("ML prediction failed for %s: %s", card.name, exc)
                 ml_prediction = None
 
         if ml_prediction is not None:
@@ -778,15 +790,27 @@ def _validate_deck(
 def _attempt_fixes(deck: Deck, errors: list[str]) -> None:
     """Attempt to fix minor deck validation issues.
 
-    Currently a no-op placeholder. Future implementations could:
-    - Adjust card counts to hit 100
-    - Swap expensive cards for cheaper alternatives
-    - Remove duplicates
+    Hard invariant violations (duplicate non-basic cards) raise a
+    ``ValueError`` immediately because they indicate a logic error in
+    the build pipeline and cannot be silently ignored.
+
+    Soft violations (card count slightly off, budget slightly over)
+    are logged as warnings so callers see them in logs without crashing.
 
     Args:
         deck: The deck to fix (modified in-place).
-        errors: List of validation errors.
+        errors: List of validation error strings from ``_validate_deck``.
+
+    Raises:
+        ValueError: If a hard invariant violation is detected
+            (e.g. duplicate non-basic card entries).
     """
-    # For now, just log/acknowledge issues.
-    # The build algorithm should produce valid decks in most cases.
-    pass
+    for error in errors:
+        # Hard invariant: duplicate card entries are a pipeline bug
+        if "Duplicate card entry" in error or "has quantity" in error:
+            raise ValueError(
+                f"Hard deck invariant violated — cannot continue: {error}"
+            )
+
+        # Soft violations: log and continue
+        logger.warning("Deck validation warning: %s", error)

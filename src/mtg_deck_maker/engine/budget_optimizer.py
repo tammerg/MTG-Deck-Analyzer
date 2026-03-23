@@ -252,6 +252,35 @@ def _get_cmc_bucket(card: object) -> int:
     return min(7, int(getattr(card, "cmc", 0)))
 
 
+def _compute_llm_synergy_bonus(
+    candidate_name: str,
+    selected_names: list[str],
+    matrix: dict[tuple[str, str], float],
+) -> float:
+    """Compute average LLM synergy between candidate and already-selected cards.
+
+    Args:
+        candidate_name: Name of the candidate card.
+        selected_names: Names of already-selected cards.
+        matrix: LLM synergy matrix with canonical keys.
+
+    Returns:
+        Average synergy score with selected cards, or 0.0 if no matches.
+    """
+    if not selected_names or not matrix:
+        return 0.0
+
+    total = 0.0
+    count = 0
+    for sel_name in selected_names:
+        key = (min(candidate_name, sel_name), max(candidate_name, sel_name))
+        if key in matrix:
+            total += matrix[key]
+            count += 1
+
+    return total / count if count > 0 else 0.0
+
+
 def optimize_for_budget(
     candidates: list[ScoredCandidate],
     budget: float,
@@ -259,6 +288,7 @@ def optimize_for_budget(
     ideal_curve: dict[int, float] | None = None,
     total_nonland_target: int = 0,
     card_texts: dict[int, str] | None = None,
+    llm_synergy_matrix: dict[tuple[str, str], float] | None = None,
 ) -> list[ScoredCandidate]:
     """Select cards from candidates to fill category targets within budget.
 
@@ -308,10 +338,13 @@ def optimize_for_budget(
     category_counts: dict[str, int] = {}
     # Track oracle texts of selected cards for duplicate detection
     selected_texts: list[str] = []
+    # Track names of selected cards for LLM synergy bonus
+    selected_names: list[str] = []
 
     def _track_selected(cand: ScoredCandidate) -> None:
         """Update tracking state after selecting a card."""
         category_counts[cand.category] = category_counts.get(cand.category, 0) + 1
+        selected_names.append(cand.card.name)
         if card_texts is not None:
             text = card_texts.get(cand.card_id, "")
             if text:
@@ -343,6 +376,13 @@ def optimize_for_budget(
                     cand_text, selected_texts,
                 )
                 adjusted *= dup_pen
+
+        # Apply LLM synergy bonus
+        if llm_synergy_matrix is not None and selected_names:
+            llm_bonus = _compute_llm_synergy_bonus(
+                cand.card.name, selected_names, llm_synergy_matrix,
+            )
+            adjusted *= (1.0 + llm_bonus * 0.15)
 
         return adjusted
 

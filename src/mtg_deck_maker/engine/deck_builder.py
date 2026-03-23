@@ -272,6 +272,8 @@ def build_deck(
     priority_cards: list[str] | None = None,
     edhrec_inclusion: dict[str, float] | None = None,
     combo_partners: dict[str, list[str]] | None = None,
+    llm_synergy_matrix: dict[tuple[str, str], float] | None = None,
+    power_predictor: object | None = None,
 ) -> Deck:
     """Build a complete 100-card Commander deck from a card pool.
 
@@ -383,6 +385,8 @@ def build_deck(
         priority_cards=priority_cards,
         edhrec_inclusion=edhrec_inclusion,
         combo_partners=combo_partners,
+        power_predictor=power_predictor,
+        commander_card=primary_commander,
     )
 
     # Shuffle with seed for tie-breaking determinism
@@ -411,6 +415,7 @@ def build_deck(
         nonland_candidates, nonland_budget, category_targets,
         ideal_curve=ideal_curve,
         total_nonland_target=nonland_card_count,
+        llm_synergy_matrix=llm_synergy_matrix,
     )
 
     # Ensure we have exactly the right number of nonland cards
@@ -514,6 +519,8 @@ def _build_scored_candidates(
     priority_cards: list[str] | None = None,
     edhrec_inclusion: dict[str, float] | None = None,
     combo_partners: dict[str, list[str]] | None = None,
+    power_predictor: object | None = None,
+    commander_card: Card | None = None,
 ) -> list[ScoredCandidate]:
     """Build scored candidates for the budget optimizer.
 
@@ -547,9 +554,18 @@ def _build_scored_candidates(
         synergy = synergies.get(key, 0.0)
         price = prices.get(card.id if card.id is not None else -1, 0.50)
 
-        # Power score: use per-commander inclusion rate if available,
-        # otherwise fall back to generic EDHREC rank normalization.
-        if edhrec_inclusion and card.name in edhrec_inclusion:
+        # Power score: try ML prediction first, then per-commander
+        # inclusion rate, then fall back to generic EDHREC rank.
+        ml_prediction = None
+        if power_predictor is not None and commander_card is not None:
+            try:
+                ml_prediction = power_predictor.predict(card, commander_card)  # type: ignore[attr-defined]
+            except Exception:
+                ml_prediction = None
+
+        if ml_prediction is not None:
+            power = ml_prediction * 0.7 + confidence * 0.3
+        elif edhrec_inclusion and card.name in edhrec_inclusion:
             power = edhrec_inclusion[card.name] * 0.6 + confidence * 0.4
         else:
             power = _normalize_edhrec_rank(card.edhrec_rank) * 0.6 + confidence * 0.4

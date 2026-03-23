@@ -5,18 +5,14 @@ from __future__ import annotations
 import pytest
 
 from mtg_deck_maker.config import AppConfig
-from unittest.mock import patch
 
 from mtg_deck_maker.engine.deck_builder import (
-    ARCHETYPE_CATEGORY_TARGETS,
     IDEAL_CURVE,
     Archetype,
     DeckBuildError,
     build_deck,
     detect_archetype,
-    DEFAULT_CATEGORY_TARGETS,
-    _normalize_edhrec_rank,
-    _get_primary_category,
+    _build_scored_candidates,
 )
 from mtg_deck_maker.engine.categories import Category
 from mtg_deck_maker.models.card import Card
@@ -39,7 +35,7 @@ def _make_card(
     colors: list[str] | None = None,
     color_identity: list[str] | None = None,
     keywords: list[str] | None = None,
-    edhrec_rank: int = 1000,
+    edhrec_rank: int | None = 1000,
     legal_commander: bool = True,
 ) -> Card:
     """Create a test Card with sensible defaults."""
@@ -127,7 +123,7 @@ def _build_card_pool(
     relevant_colors = color_identity if color_identity else [""]
 
     # --- Ramp cards ---
-    ramp_templates = [
+    ramp_templates: list[tuple[str, str, str, str, float, list[str], list[str]]] = [
         ("Sol Ring", "Artifact", "{T}: Add {C}{C}.", "{1}", 1.0, [], []),
         ("Arcane Signet", "Artifact", "{T}: Add one mana of any color in your commander's color identity.", "{2}", 2.0, [], []),
         ("Mind Stone", "Artifact", "{T}: Add {C}.\n{1}, {T}, Sacrifice Mind Stone: Draw a card.", "{2}", 2.0, [], []),
@@ -553,3 +549,116 @@ class TestManaCurveShaping:
         for archetype_name, curve in IDEAL_CURVE.items():
             total = sum(curve.values())
             assert abs(total - 1.0) < 0.01
+
+
+class TestPowerPredictorIntegration:
+    """Tests for ML power predictor integration in _build_scored_candidates."""
+
+    def _simple_pool(self) -> list[Card]:
+        return [
+            _make_card(100, "Card A", "Creature", "Flying", cmc=3.0, colors=["W"], color_identity=["W"]),
+            _make_card(101, "Card B", "Instant", "Draw two cards.", cmc=2.0, colors=["U"], color_identity=["U"]),
+            _make_card(102, "Card C", "Sorcery", "Destroy target creature.", cmc=3.0, colors=["B"], color_identity=["B"]),
+        ]
+
+    def _commander(self) -> Card:
+        return _make_card(
+            999, "Test Commander",
+            type_line="Legendary Creature — Human Wizard",
+            oracle_text="Flying",
+            cmc=4.0, colors=["W", "U"], color_identity=["W", "U"],
+        )
+
+    def test_no_predictor_uses_edhrec_fallback(self) -> None:
+        pool = self._simple_pool()
+        config = AppConfig()
+        categories = {c.id: [("utility", 0.5)] for c in pool}
+        synergies = {c.id: 0.5 for c in pool}
+        prices = {c.id: 1.0 for c in pool}
+
+        result = _build_scored_candidates(
+            pool, categories, synergies, prices, config,
+            power_predictor=None, commander_card=self._commander(),
+        )
+        assert len(result) == 3
+        assert all(c.score > 0 for c in result)
+
+    def test_predictor_overrides_power_score(self) -> None:
+        pool = self._simple_pool()
+        config = AppConfig()
+        categories = {c.id: [("utility", 0.5)] for c in pool}
+        synergies = {c.id: 0.5 for c in pool}
+        prices = {c.id: 1.0 for c in pool}
+
+        class HighPredictor:
+            def predict(self, card: Card, commander: Card) -> float:
+                return 0.95
+
+        result_with_ml = _build_scored_candidates(
+            pool, categories, synergies, prices, config,
+            power_predictor=HighPredictor(), commander_card=self._commander(),
+        )
+
+        result_without_ml = _build_scored_candidates(
+            pool, categories, synergies, prices, config,
+            power_predictor=None, commander_card=self._commander(),
+        )
+
+        # ML predictor returning 0.95 should produce higher scores
+        for with_ml, without_ml in zip(result_with_ml, result_without_ml):
+            assert with_ml.score >= without_ml.score
+
+    def test_predictor_returning_none_falls_back(self) -> None:
+        pool = self._simple_pool()
+        config = AppConfig()
+        categories = {c.id: [("utility", 0.5)] for c in pool}
+        synergies = {c.id: 0.5 for c in pool}
+        prices = {c.id: 1.0 for c in pool}
+
+        class NonePredictor:
+            def predict(self, card: Card, commander: Card) -> None:
+                return None
+
+        result = _build_scored_candidates(
+            pool, categories, synergies, prices, config,
+            power_predictor=NonePredictor(), commander_card=self._commander(),
+        )
+        # Should still produce results using EDHREC fallback
+        assert len(result) == 3
+        assert all(c.score > 0 for c in result)
+
+    def test_no_commander_card_skips_predictor(self) -> None:
+        pool = self._simple_pool()
+        config = AppConfig()
+        categories = {c.id: [("utility", 0.5)] for c in pool}
+        synergies = {c.id: 0.5 for c in pool}
+        prices = {c.id: 1.0 for c in pool}
+
+        class ShouldNotBeCalled:
+            def predict(self, card: Card, commander: Card) -> float:
+                raise AssertionError("Should not be called")
+
+        # commander_card=None should skip the predictor entirely
+        result = _build_scored_candidates(
+            pool, categories, synergies, prices, config,
+            power_predictor=ShouldNotBeCalled(), commander_card=None,
+        )
+        assert len(result) == 3
+
+    def test_predictor_exception_falls_back(self) -> None:
+        pool = self._simple_pool()
+        config = AppConfig()
+        categories = {c.id: [("utility", 0.5)] for c in pool}
+        synergies = {c.id: 0.5 for c in pool}
+        prices = {c.id: 1.0 for c in pool}
+
+        class ErrorPredictor:
+            def predict(self, card: Card, commander: Card) -> float:
+                raise RuntimeError("model broken")
+
+        # Exception in predict should be caught, falls back to EDHREC
+        result = _build_scored_candidates(
+            pool, categories, synergies, prices, config,
+            power_predictor=ErrorPredictor(), commander_card=self._commander(),
+        )
+        assert len(result) == 3

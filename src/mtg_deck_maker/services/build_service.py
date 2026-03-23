@@ -8,8 +8,12 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from mtg_deck_maker.config import AppConfig
+
+if TYPE_CHECKING:
+    from mtg_deck_maker.db.database import Database
 from mtg_deck_maker.engine.deck_builder import DeckBuildError, build_deck
 from mtg_deck_maker.io.csv_export import export_deck_to_csv
 from mtg_deck_maker.models.card import Card
@@ -77,6 +81,8 @@ class BuildService:
         csv_filepath: str | None = None,
         priority_cards: list[str] | None = None,
         edhrec_inclusion: dict[str, float] | None = None,
+        llm_synergy_matrix: dict[tuple[str, str], float] | None = None,
+        power_predictor: object | None = None,
     ) -> BuildResult:
         """Execute the full deck build pipeline.
 
@@ -96,6 +102,7 @@ class BuildService:
             priority_cards: Optional list of card names recommended by LLM.
             edhrec_inclusion: Optional per-commander card inclusion rates
                 mapping card name -> inclusion rate (0.0 to 1.0).
+            power_predictor: Optional ML power predictor for card scoring.
 
         Returns:
             BuildResult containing the deck, warnings, and optional CSV.
@@ -123,6 +130,8 @@ class BuildService:
                 seed=seed,
                 priority_cards=priority_cards,
                 edhrec_inclusion=edhrec_inclusion,
+                llm_synergy_matrix=llm_synergy_matrix,
+                power_predictor=power_predictor,
             )
         except DeckBuildError as exc:
             raise BuildServiceError(f"Deck build failed: {exc}") from exc
@@ -164,7 +173,7 @@ class BuildService:
         self,
         commander_name: str,
         budget: float,
-        db: object,
+        db: Database,
         *,
         partner_name: str | None = None,
         seed: int = 42,
@@ -320,6 +329,65 @@ class BuildService:
                 logger.warning("Smart build research failed: %s", exc)
                 _progress(f"Smart build research failed: {exc}")
 
+        # 6b. LLM synergy matrix (when smart mode + LLM available)
+        llm_synergy_matrix: dict[tuple[str, str], float] | None = None
+        if smart and priority_cards:
+            try:
+                from mtg_deck_maker.advisor.llm_provider import get_provider as _get_provider
+                from mtg_deck_maker.advisor.llm_synergy import (
+                    generate_synergy_matrix,
+                )
+                from mtg_deck_maker.db.llm_synergy_repo import LLMSynergyRepo
+
+                llm = _get_provider(provider, model=llm_model)
+                if llm is not None:
+                    synergy_repo = LLMSynergyRepo(db)
+                    synergy_repo.create_tables()
+
+                    model_name = llm_model or llm.name
+                    card_names = [c.name for c in card_pool[:100]]
+                    cached = synergy_repo.get_cached_matrix(
+                        commander_name, card_names, model_name,
+                    )
+                    if cached:
+                        llm_synergy_matrix = cached
+                        _progress(
+                            f"Using {len(cached)} cached LLM synergy scores"
+                        )
+                    else:
+                        _progress("Generating LLM synergy matrix...")
+                        llm_synergy_matrix = generate_synergy_matrix(
+                            cmd_card,
+                            card_pool[:100],
+                            llm,
+                            top_n=100,
+                            batch_size=50,
+                        )
+                        if llm_synergy_matrix:
+                            synergy_repo.upsert_scores(
+                                commander_name,
+                                llm_synergy_matrix,
+                                model_name,
+                            )
+                            _progress(
+                                f"Cached {len(llm_synergy_matrix)} LLM synergy scores"
+                            )
+            except Exception as exc:
+                logger.warning("LLM synergy matrix failed: %s", exc)
+                _progress(f"LLM synergy matrix unavailable: {exc}")
+
+        # 6c. ML power predictor (auto-load if model file exists)
+        predictor: object | None = None
+        try:
+            from mtg_deck_maker.ml.predictor import PowerPredictor
+
+            pp = PowerPredictor()
+            if pp.is_available():
+                predictor = pp
+                _progress("Using ML power prediction model")
+        except Exception:
+            pass
+
         # 7. Build
         _progress("Building deck...")
         return self.build(
@@ -332,4 +400,6 @@ class BuildService:
             csv_filepath=csv_filepath,
             priority_cards=priority_cards,
             edhrec_inclusion=edhrec_inclusion,
+            llm_synergy_matrix=llm_synergy_matrix,
+            power_predictor=predictor,
         )

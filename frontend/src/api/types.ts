@@ -189,3 +189,62 @@ export interface AdviseRequest {
 export interface DeckAdviseResponse {
   advice: string;
 }
+
+// Strategy Guide types
+
+export interface StrategyGuideRequest {
+  provider?: string;
+  num_simulations?: number;
+  seed?: number;
+}
+
+export interface HandSampleResponse {
+  cards: string[];
+  land_count: number;
+  ramp_count: number;
+  avg_cmc: number;
+  has_win_enabler: boolean;
+  keep_recommendation: boolean;
+  reason: string;
+}
+
+export interface HandSimulationResponse {
+  total_simulations: number;
+  keep_rate: number;
+  avg_land_count: number;
+  avg_ramp_count: number;
+  avg_cmc_in_hand: number;
+  sample_hands: HandSampleResponse[];
+  mulligan_advice: string;
+}
+
+export interface WinPathResponse {
+  name: string;
+  cards: string[];
+  description: string;
+  combo_id: string | null;
+}
+
+export interface GamePhaseResponse {
+  phase_name: string;
+  turn_range: string;
+  priorities: string[];
+  key_cards: string[];
+  description: string;
+}
+
+export interface KeySynergyResponse {
+  card_a: string;
+  card_b: string;
+  reason: string;
+}
+
+export interface StrategyGuideResponse {
+  archetype: string;
+  themes: string[];
+  win_paths: WinPathResponse[];
+  game_phases: GamePhaseResponse[];
+  hand_simulation: HandSimulationResponse | null;
+  key_synergies: KeySynergyResponse[];
+  llm_narrative: string | null;
+}

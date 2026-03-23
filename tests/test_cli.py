@@ -161,6 +161,8 @@ class TestAdviseCommand:
         """advise should execute and fall back gracefully without API key."""
         env = dict(os.environ)
         env.pop("ANTHROPIC_API_KEY", None)
+        env.pop("OPENAI_API_KEY", None)
+        env["MTG_SKIP_DOTENV"] = "1"
         result = runner.invoke(
             cli,
             ["advise", sample_csv, "--problem", "My deck is too slow"],

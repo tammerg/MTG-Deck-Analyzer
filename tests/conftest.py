@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
+
+# Prevent CLI group callback from loading .env during tests
+os.environ["MTG_SKIP_DOTENV"] = "1"
 
 from mtg_deck_maker.db.database import Database
 from mtg_deck_maker.models.card import Card

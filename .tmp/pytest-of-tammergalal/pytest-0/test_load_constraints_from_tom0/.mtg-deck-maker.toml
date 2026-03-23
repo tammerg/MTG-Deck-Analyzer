@@ -1,0 +1,16 @@
+
+[constraints]
+avoid_reserved_list = false
+max_price_per_card = 10.0
+exclude_cards = ["Mana Crypt", "Dockside Extortionist"]
+force_cards = ["Skullclamp"]
+allow_fast_mana = true
+
+[pricing]
+preferred_source = "cardmarket"
+preferred_currency = "EUR"
+
+[general]
+data_dir = "/custom/data"
+cache_ttl_hours = 12
+offline_mode = true

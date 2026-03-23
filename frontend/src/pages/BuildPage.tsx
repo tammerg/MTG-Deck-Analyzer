@@ -10,7 +10,7 @@ interface LocationState {
 
 const DEFAULT_CONFIG: BuildConfig = {
   budget: 100,
-  smart: true,
+  smart: false,
   provider: '',
   seed: '',
 };
@@ -137,7 +137,7 @@ export default function BuildPage() {
       )}
 
       {/* Build button */}
-      <div className="mt-8 space-y-4">
+      <div className="mt-6 space-y-4">
         <button
           type="button"
           onClick={handleBuild}
@@ -145,9 +145,9 @@ export default function BuildPage() {
           aria-busy={isBuilding}
           className={[
             'w-full rounded-lg px-6 py-4 text-base font-semibold transition-all',
-            'bg-[var(--color-accent)] text-white',
+            'bg-[var(--color-accent)] text-white shadow-lg shadow-[var(--color-accent)]/20',
             'hover:bg-[var(--color-accent-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] focus:ring-offset-2 focus:ring-offset-[var(--color-surface)]',
-            'disabled:opacity-40 disabled:cursor-not-allowed',
+            'disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none',
           ].join(' ')}
         >
           {isBuilding ? (

@@ -8,6 +8,7 @@ import ColorDistribution from '../components/deck/ColorDistribution';
 import DeckCategoryGroup from '../components/deck/DeckCategoryGroup';
 import ExportMenu from '../components/deck/ExportMenu';
 import AdvisePanel from '../components/deck/AdvisePanel';
+import StrategyGuidePanel from '../components/deck/StrategyGuide';
 import { getCategorySortOrder } from '../utils/categories';
 import type { DeckCardResponse } from '../api/types';
 
@@ -230,6 +231,11 @@ export default function DeckViewPage() {
           )}
         </aside>
       </div>
+
+      {/* Strategy Guide */}
+      {id != null && (
+        <StrategyGuidePanel deckId={id} />
+      )}
 
       {/* AI Advisor */}
       {id != null && (

@@ -1,0 +1,11 @@
+
+[llm]
+provider = "openai"
+openai_model = "gpt-4o-mini"
+anthropic_model = "claude-haiku-4-5-20251001"
+max_tokens = 4096
+temperature = 0.5
+timeout_s = 30.0
+max_retries = 5
+research_enabled = false
+priority_bonus = 300

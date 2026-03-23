@@ -1,5 +1,5 @@
 import api from './client';
-import type { DeckBuildRequest, DeckResponse, DeckListItem, DeckExportFormat, DeckExportResponse, AdviseRequest, DeckAdviseResponse } from './types';
+import type { DeckBuildRequest, DeckResponse, DeckListItem, DeckExportFormat, DeckExportResponse, AdviseRequest, DeckAdviseResponse, StrategyGuideRequest, StrategyGuideResponse } from './types';
 
 /**
  * Build a new deck from a commander name and budget.
@@ -55,5 +55,18 @@ export async function exportDeck(id: number, format: DeckExportFormat = 'csv'): 
 export async function adviseDeck(id: number, question: string, provider?: string): Promise<DeckAdviseResponse> {
   const body: AdviseRequest = { question, ...(provider ? { provider } : {}) };
   const { data } = await api.post<DeckAdviseResponse>(`/decks/${id}/advise`, body);
+  return data;
+}
+
+/**
+ * Generate a strategy guide for a deck.
+ *
+ * Usage:
+ *   const guide = await getStrategyGuide(42);
+ *   const guide = await getStrategyGuide(42, { provider: 'anthropic', num_simulations: 500 });
+ */
+export async function getStrategyGuide(id: number, request?: StrategyGuideRequest): Promise<StrategyGuideResponse> {
+  const body: StrategyGuideRequest = { provider: 'auto', num_simulations: 1000, seed: 42, ...request };
+  const { data } = await api.post<StrategyGuideResponse>(`/decks/${id}/strategy-guide`, body);
   return data;
 }

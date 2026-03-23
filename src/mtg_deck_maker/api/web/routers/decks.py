@@ -15,6 +15,8 @@ from mtg_deck_maker.api.web.schemas.deck import (
     DeckCardResponse,
     DeckExportRequest,
     DeckResponse,
+    StrategyGuideRequest,
+    StrategyGuideResponse,
 )
 from mtg_deck_maker.config import AppConfig
 from mtg_deck_maker.db.card_repo import CardRepository
@@ -426,3 +428,78 @@ def advise_deck(
         "question": req.question,
         "advice": advice,
     }
+
+
+@router.post(
+    "/decks/{deck_id}/strategy-guide",
+    response_model=StrategyGuideResponse,
+)
+def strategy_guide(
+    deck_id: int,
+    req: StrategyGuideRequest,
+    db: Database = Depends(get_db),
+) -> StrategyGuideResponse:
+    """Generate a strategy guide for a deck.
+
+    Args:
+        deck_id: The deck's database primary key.
+        req: Strategy guide request with simulation parameters.
+
+    Returns:
+        StrategyGuideResponse with analysis and optional LLM narrative.
+
+    Raises:
+        HTTPException: 404 if the deck is not found.
+    """
+    from mtg_deck_maker.advisor.llm_provider import get_provider
+    from mtg_deck_maker.services.strategy_guide_service import StrategyGuideService
+
+    llm = get_provider(req.provider)
+
+    service = StrategyGuideService()
+    try:
+        guide = service.generate(
+            deck_id=deck_id,
+            db=db,
+            llm_provider=llm,
+            seed=req.seed,
+            num_sims=req.num_simulations,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Strategy guide generation failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return StrategyGuideResponse(
+        archetype=guide.archetype,
+        themes=guide.themes,
+        win_paths=[
+            {"name": wp.name, "cards": wp.cards, "description": wp.description, "combo_id": wp.combo_id}
+            for wp in guide.win_paths
+        ],
+        game_phases=[
+            {"phase_name": gp.phase_name, "turn_range": gp.turn_range,
+             "priorities": gp.priorities, "key_cards": gp.key_cards, "description": gp.description}
+            for gp in guide.game_phases
+        ],
+        hand_simulation={
+            "total_simulations": guide.hand_simulation.total_simulations,
+            "keep_rate": guide.hand_simulation.keep_rate,
+            "avg_land_count": guide.hand_simulation.avg_land_count,
+            "avg_ramp_count": guide.hand_simulation.avg_ramp_count,
+            "avg_cmc_in_hand": guide.hand_simulation.avg_cmc_in_hand,
+            "sample_hands": [
+                {"cards": sh.cards, "land_count": sh.land_count, "ramp_count": sh.ramp_count,
+                 "avg_cmc": sh.avg_cmc, "has_win_enabler": sh.has_win_enabler,
+                 "keep_recommendation": sh.keep_recommendation, "reason": sh.reason}
+                for sh in guide.hand_simulation.sample_hands
+            ],
+            "mulligan_advice": guide.hand_simulation.mulligan_advice,
+        } if guide.hand_simulation else None,
+        key_synergies=[
+            {"card_a": ks.card_a, "card_b": ks.card_b, "reason": ks.reason}
+            for ks in guide.key_synergies
+        ],
+        llm_narrative=guide.llm_narrative,
+    )

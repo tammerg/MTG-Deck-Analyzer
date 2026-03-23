@@ -23,6 +23,10 @@ def _get_db_path() -> Path:
 @click.version_option(version=__version__, prog_name="mtg-deck")
 def cli() -> None:
     """MTG Commander Deck Creator - build, analyze, and upgrade Commander decks."""
+    if not os.environ.get("MTG_SKIP_DOTENV"):
+        from dotenv import load_dotenv
+
+        load_dotenv()
 
 
 @cli.command()

@@ -2,18 +2,22 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
+
+ProviderLiteral = Literal["auto", "openai", "anthropic"]
 
 
 class DeckBuildRequest(BaseModel):
     """Request body for building a new deck."""
 
-    commander: str
-    partner: str | None = None
+    commander: str = Field(min_length=1, max_length=200)
+    partner: str | None = Field(default=None, max_length=200)
     budget: float = Field(100.0, gt=0)
     seed: int = 42
     smart: bool = False
-    provider: str = "auto"
+    provider: ProviderLiteral = "auto"
 
 
 class DeckCardResponse(BaseModel):
@@ -49,6 +53,23 @@ class DeckResponse(BaseModel):
     commanders: list[DeckCardResponse]
 
 
+class DeckSummaryResponse(BaseModel):
+    """Lightweight response schema for the list_decks endpoint.
+
+    Contains only deck metadata and aggregated statistics, avoiding the
+    3-query-per-deck cost of full card enrichment.
+    """
+
+    id: int
+    name: str
+    format: str
+    budget_target: float
+    created_at: str
+    total_cards: int
+    total_price: float
+    commander_names: list[str]
+
+
 class DeckExportRequest(BaseModel):
     """Request body for exporting a deck."""
 
@@ -59,7 +80,7 @@ class DeckAdviseRequest(BaseModel):
     """Request body for getting deck advice."""
 
     question: str = "What improvements would you suggest for this deck?"
-    provider: str = "auto"
+    provider: ProviderLiteral = "auto"
 
 
 # ---------------------------------------------------------------------------
@@ -70,8 +91,8 @@ class DeckAdviseRequest(BaseModel):
 class StrategyGuideRequest(BaseModel):
     """Request body for generating a strategy guide."""
 
-    provider: str = "auto"
-    num_simulations: int = 1000
+    provider: ProviderLiteral = "auto"
+    num_simulations: int = Field(1000, gt=0, le=10000)
     seed: int = 42
 
 

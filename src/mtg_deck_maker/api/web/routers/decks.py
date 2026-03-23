@@ -15,6 +15,7 @@ from mtg_deck_maker.api.web.schemas.deck import (
     DeckCardResponse,
     DeckExportRequest,
     DeckResponse,
+    DeckSummaryResponse,
     StrategyGuideRequest,
     StrategyGuideResponse,
 )
@@ -209,24 +210,32 @@ def build_deck(
     return _deck_to_response(saved_deck, card_repo, printing_repo, price_repo)
 
 
-@router.get("/decks", response_model=list[DeckResponse])
+@router.get("/decks", response_model=list[DeckSummaryResponse])
 def list_decks(
     db: Database = Depends(get_db),
-) -> list[DeckResponse]:
-    """List all persisted decks (without card details for performance).
+) -> list[DeckSummaryResponse]:
+    """List all persisted decks as lightweight summaries.
+
+    Returns one aggregated SQL row per deck — no per-card enrichment queries.
+    Use ``GET /decks/{deck_id}`` to retrieve a deck with full card details.
 
     Returns:
-        List of DeckResponse objects with empty cards lists.
+        List of DeckSummaryResponse objects ordered by creation date descending.
     """
     deck_repo = DeckRepository(db)
-    card_repo = CardRepository(db)
-    printing_repo = PrintingRepository(db)
-    price_repo = PriceRepository(db)
-
-    decks = deck_repo.list_decks()
+    summaries = deck_repo.list_decks_summary()
     return [
-        _deck_to_response(d, card_repo, printing_repo, price_repo)
-        for d in decks
+        DeckSummaryResponse(
+            id=s.id,
+            name=s.name,
+            format=s.format,
+            budget_target=s.budget_target,
+            created_at=s.created_at,
+            total_cards=s.total_cards,
+            total_price=s.total_price,
+            commander_names=s.commander_names,
+        )
+        for s in summaries
     ]
 
 

@@ -13,20 +13,16 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-
+from mtg_deck_maker.ml.constants import DEFAULT_MODEL_PATH
 from mtg_deck_maker.models.card import Card
 
 logger = logging.getLogger(__name__)
-
-# Default model save path
-DEFAULT_MODEL_PATH = Path("data/power_model.joblib")
 
 
 def build_dataset(
     commander_cards: list[tuple[Card, list[Any]]],
     card_pool_fn: Callable[[Card], list[Card]] | None = None,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[Any, Any]:
     """Build training dataset from commander EDHREC data.
 
     For each commander, creates:
@@ -76,6 +72,8 @@ def build_dataset(
                 x_rows.append(features)
                 y_values.append(0.0)
 
+    import numpy as np
+
     if not x_rows:
         return np.empty((0, 0)), np.empty(0)
 
@@ -83,8 +81,8 @@ def build_dataset(
 
 
 def train_model(
-    x: np.ndarray,
-    y: np.ndarray,
+    x: Any,
+    y: Any,
     n_estimators: int = 200,
     max_depth: int = 5,
     learning_rate: float = 0.1,
@@ -123,8 +121,8 @@ def train_model(
 
 def evaluate_model(
     model: Any,
-    x_test: np.ndarray,
-    y_test: np.ndarray,
+    x_test: Any,
+    y_test: Any,
 ) -> dict[str, float]:
     """Evaluate a trained model on test data.
 
@@ -136,6 +134,7 @@ def evaluate_model(
     Returns:
         Dict with 'mae', 'rmse', 'r2' metrics.
     """
+    import numpy as np
     from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
     y_pred = model.predict(x_test)

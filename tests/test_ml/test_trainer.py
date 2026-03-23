@@ -413,4 +413,6 @@ class TestSaveLoadModel:
     def test_default_model_path_constant(self) -> None:
         from mtg_deck_maker.ml.trainer import DEFAULT_MODEL_PATH
 
-        assert DEFAULT_MODEL_PATH == Path("data/power_model.joblib")
+        assert DEFAULT_MODEL_PATH.name == "power_model.joblib"
+        assert DEFAULT_MODEL_PATH.parent.name == "data"
+        assert DEFAULT_MODEL_PATH.is_absolute()

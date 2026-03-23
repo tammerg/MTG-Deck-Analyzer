@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 
-from mtg_deck_maker.ml.trainer import DEFAULT_MODEL_PATH
+from mtg_deck_maker.ml.constants import DEFAULT_MODEL_PATH
 from mtg_deck_maker.models.card import Card
 
 logger = logging.getLogger(__name__)
@@ -35,7 +36,6 @@ class PowerPredictor:
                 Defaults to DEFAULT_MODEL_PATH.
         """
         self._model_path = Path(model_path) if model_path else DEFAULT_MODEL_PATH
-        from typing import Any
         self._model: Any | None = None
         self._load()
 
@@ -48,9 +48,9 @@ class PowerPredictor:
 
             self._model = joblib.load(self._model_path)
             logger.info("Loaded power model from %s", self._model_path)
-        except Exception:
+        except Exception as exc:
             logger.warning(
-                "Failed to load power model from %s", self._model_path
+                "Failed to load power model from %s: %s", self._model_path, exc
             )
             self._model = None
 
@@ -81,6 +81,6 @@ class PowerPredictor:
             x = np.array([features])
             prediction = float(self._model.predict(x)[0])
             return max(0.0, min(1.0, prediction))
-        except Exception:
-            logger.warning("Power prediction failed for %s", card.name)
+        except Exception as exc:
+            logger.warning("Power prediction failed for %s: %s", card.name, exc)
             return None

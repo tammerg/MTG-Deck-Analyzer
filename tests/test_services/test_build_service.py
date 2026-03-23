@@ -462,3 +462,316 @@ class TestBuildServiceHelpers:
         ):
             result = service._fetch_edhrec_data("Test Commander", mock_db)
         assert result is None
+
+    def test_fetch_edhrec_data_returns_dict_on_success(self):
+        """Returns a card-name -> inclusion-rate dict when data is available."""
+        service = BuildService()
+        mock_db = MagicMock()
+
+        # Mock repo that reports data is present and not stale
+        mock_repo = MagicMock()
+        mock_repo.has_data.return_value = True
+        mock_repo.is_stale.return_value = False
+
+        # Two top cards returned
+        card_a = MagicMock()
+        card_a.card_name = "Sol Ring"
+        card_a.inclusion_rate = 0.95
+
+        card_b = MagicMock()
+        card_b.card_name = "Command Tower"
+        card_b.inclusion_rate = 0.90
+
+        mock_repo.get_top_cards.return_value = [card_a, card_b]
+
+        with patch("mtg_deck_maker.db.edhrec_repo.EdhrecRepository", return_value=mock_repo):
+            result = service._fetch_edhrec_data("Test Commander", mock_db)
+
+        assert result is not None
+        assert result["Sol Ring"] == pytest.approx(0.95)
+        assert result["Command Tower"] == pytest.approx(0.90)
+
+    def test_fetch_edhrec_data_logs_warning_on_failure(self, caplog):
+        """A warning is logged when EDHREC data cannot be fetched."""
+        service = BuildService()
+        mock_db = MagicMock()
+
+        with patch(
+            "mtg_deck_maker.db.edhrec_repo.EdhrecRepository",
+            side_effect=RuntimeError("timeout"),
+        ):
+            with caplog.at_level(logging.WARNING, logger="mtg_deck_maker.services.build_service"):
+                result = service._fetch_edhrec_data("Test Commander", mock_db)
+
+        assert result is None
+        assert any("EDHREC" in r.message for r in caplog.records)
+
+    def test_run_smart_research_returns_key_cards_on_success(self):
+        """Returns the list of key cards when research succeeds."""
+        service = BuildService()
+
+        mock_llm = MagicMock()
+        mock_llm.name = "test-provider"
+
+        mock_research = MagicMock()
+        mock_research.parse_success = True
+        mock_research.key_cards = ["Sol Ring", "Command Tower", "Arcane Signet"]
+
+        mock_research_svc = MagicMock()
+        mock_research_svc.research_commander.return_value = mock_research
+
+        with patch(
+            "mtg_deck_maker.advisor.llm_provider.get_provider",
+            return_value=mock_llm,
+        ):
+            with patch(
+                "mtg_deck_maker.services.research_service.ResearchService",
+                return_value=mock_research_svc,
+            ):
+                result = service._run_smart_research(
+                    cmd_name="Test Commander",
+                    budget=150.0,
+                    oracle_text="Proliferate at end of turn.",
+                    color_identity=["W", "U", "B", "G"],
+                    llm_provider="auto",
+                    llm_model=None,
+                )
+
+        assert result == ["Sol Ring", "Command Tower", "Arcane Signet"]
+
+    def test_run_smart_research_returns_none_on_parse_failure(self, caplog):
+        """Returns None and logs a warning when LLM response cannot be parsed."""
+        service = BuildService()
+
+        mock_llm = MagicMock()
+        mock_llm.name = "test-provider"
+
+        mock_research = MagicMock()
+        mock_research.parse_success = False
+        mock_research.key_cards = []
+
+        mock_research_svc = MagicMock()
+        mock_research_svc.research_commander.return_value = mock_research
+
+        with patch(
+            "mtg_deck_maker.advisor.llm_provider.get_provider",
+            return_value=mock_llm,
+        ):
+            with patch(
+                "mtg_deck_maker.services.research_service.ResearchService",
+                return_value=mock_research_svc,
+            ):
+                with caplog.at_level(
+                    logging.WARNING, logger="mtg_deck_maker.services.build_service"
+                ):
+                    result = service._run_smart_research(
+                        cmd_name="Test Commander",
+                        budget=150.0,
+                        oracle_text="",
+                        color_identity=["G"],
+                        llm_provider="auto",
+                        llm_model=None,
+                    )
+
+        assert result is None
+        assert any("could not be parsed" in r.message for r in caplog.records)
+
+    def test_run_smart_research_returns_none_on_exception(self, caplog):
+        """Returns None and logs a warning when an unexpected exception occurs."""
+        service = BuildService()
+
+        with patch(
+            "mtg_deck_maker.advisor.llm_provider.get_provider",
+            side_effect=RuntimeError("LLM connection refused"),
+        ):
+            with caplog.at_level(
+                logging.WARNING, logger="mtg_deck_maker.services.build_service"
+            ):
+                result = service._run_smart_research(
+                    cmd_name="Test Commander",
+                    budget=100.0,
+                    oracle_text="",
+                    color_identity=["G"],
+                    llm_provider="auto",
+                    llm_model=None,
+                )
+
+        assert result is None
+        assert any("Smart build research failed" in r.message for r in caplog.records)
+
+    def test_generate_llm_synergy_matrix_returns_cached_matrix(self):
+        """Returns the cached matrix when it already exists in the repo."""
+        service = BuildService()
+        mock_db = MagicMock()
+        cmd_card = _make_card(1, "Atraxa", "Legendary Creature", color_identity=["W", "U", "B", "G"])
+        pool = [_make_card(i, f"Card {i}", color_identity=["G"]) for i in range(2, 20)]
+
+        cached_matrix = {("Atraxa", "Sol Ring"): 0.8, ("Atraxa", "Command Tower"): 0.7}
+
+        mock_llm = MagicMock()
+        mock_llm.model_id = "claude-3-opus"
+
+        mock_repo = MagicMock()
+        mock_repo.get_cached_matrix.return_value = cached_matrix
+
+        with patch("mtg_deck_maker.advisor.llm_provider.get_provider", return_value=mock_llm):
+            with patch(
+                "mtg_deck_maker.db.llm_synergy_repo.LLMSynergyRepo",
+                return_value=mock_repo,
+            ):
+                result = service._generate_llm_synergy_matrix(
+                    commander_name="Atraxa",
+                    cmd_card=cmd_card,
+                    card_pool=pool,
+                    llm_provider="auto",
+                    llm_model=None,
+                    db=mock_db,
+                )
+
+        assert result == cached_matrix
+
+    def test_generate_llm_synergy_matrix_returns_none_on_no_provider(self):
+        """Returns None immediately when no LLM provider is configured."""
+        service = BuildService()
+        mock_db = MagicMock()
+        cmd_card = _make_card(1, "Atraxa", "Legendary Creature")
+        pool = [_make_card(i, f"Card {i}") for i in range(2, 10)]
+
+        with patch("mtg_deck_maker.advisor.llm_provider.get_provider", return_value=None):
+            result = service._generate_llm_synergy_matrix(
+                commander_name="Atraxa",
+                cmd_card=cmd_card,
+                card_pool=pool,
+                llm_provider="auto",
+                llm_model=None,
+                db=mock_db,
+            )
+
+        assert result is None
+
+    def test_generate_llm_synergy_matrix_returns_none_on_failure(self, caplog):
+        """Returns None and logs a warning when matrix generation raises."""
+        service = BuildService()
+        mock_db = MagicMock()
+        cmd_card = _make_card(1, "Atraxa", "Legendary Creature")
+        pool = [_make_card(i, f"Card {i}") for i in range(2, 10)]
+
+        with patch(
+            "mtg_deck_maker.advisor.llm_provider.get_provider",
+            side_effect=RuntimeError("API error"),
+        ):
+            with caplog.at_level(
+                logging.WARNING, logger="mtg_deck_maker.services.build_service"
+            ):
+                result = service._generate_llm_synergy_matrix(
+                    commander_name="Atraxa",
+                    cmd_card=cmd_card,
+                    card_pool=pool,
+                    llm_provider="auto",
+                    llm_model=None,
+                    db=mock_db,
+                )
+
+        assert result is None
+        assert any("synergy matrix failed" in r.message for r in caplog.records)
+
+
+# ===========================================================================
+# build_from_db full orchestration tests
+# ===========================================================================
+
+
+class TestBuildFromDbOrchestration:
+    """Tests for the full build_from_db orchestration path."""
+
+    def _make_mock_db_setup(
+        self, commander_name: str = "Test Green Commander"
+    ) -> tuple[MagicMock, MagicMock, MagicMock]:
+        """Return (mock_db, mock_card_repo, mock_price_repo) wired up."""
+        pool = _build_mono_green_pool()
+        prices = _build_prices(pool)
+        commander_card = _build_mono_green_commander().primary
+
+        mock_db = MagicMock()
+
+        mock_card_repo = MagicMock()
+        mock_card_repo.get_card_by_name.side_effect = (
+            lambda name: commander_card if name == commander_name else None
+        )
+        mock_card_repo.search_cards.return_value = []
+        mock_card_repo.get_cards_by_color_identity.return_value = pool
+
+        mock_price_repo = MagicMock()
+        mock_price_repo.get_cheapest_prices.return_value = prices
+
+        return mock_db, mock_card_repo, mock_price_repo
+
+    @patch("mtg_deck_maker.db.card_repo.CardRepository")
+    @patch("mtg_deck_maker.db.price_repo.PriceRepository")
+    def test_build_from_db_with_no_edhrec(self, MockPriceRepo, MockCardRepo):
+        """build_from_db with no_edhrec=True should skip EDHREC fetch."""
+        mock_db, mock_card_repo, mock_price_repo = self._make_mock_db_setup()
+        MockCardRepo.return_value = mock_card_repo
+        MockPriceRepo.return_value = mock_price_repo
+
+        service = BuildService()
+        service._fetch_edhrec_data = MagicMock(return_value=None)
+
+        result = service.build_from_db(
+            commander_name="Test Green Commander",
+            budget=150.0,
+            db=mock_db,
+            no_edhrec=True,
+        )
+
+        # _fetch_edhrec_data must not have been called
+        service._fetch_edhrec_data.assert_not_called()
+        assert result.deck.total_cards() == 100
+
+    @patch("mtg_deck_maker.db.card_repo.CardRepository")
+    @patch("mtg_deck_maker.db.price_repo.PriceRepository")
+    def test_build_from_db_progress_callback_called(self, MockPriceRepo, MockCardRepo):
+        """Progress callback should receive status messages during the build."""
+        mock_db, mock_card_repo, mock_price_repo = self._make_mock_db_setup()
+        MockCardRepo.return_value = mock_card_repo
+        MockPriceRepo.return_value = mock_price_repo
+
+        messages: list[str] = []
+        service = BuildService()
+        result = service.build_from_db(
+            commander_name="Test Green Commander",
+            budget=150.0,
+            db=mock_db,
+            no_edhrec=True,
+            progress_callback=messages.append,
+        )
+
+        assert result.deck.total_cards() == 100
+        assert len(messages) > 0
+        assert any("commander" in m.lower() for m in messages)
+
+    @patch("mtg_deck_maker.db.card_repo.CardRepository")
+    @patch("mtg_deck_maker.db.price_repo.PriceRepository")
+    def test_build_from_db_smart_skips_synergy_when_no_priority_cards(
+        self, MockPriceRepo, MockCardRepo
+    ):
+        """LLM synergy matrix should not be generated when smart research returns None."""
+        mock_db, mock_card_repo, mock_price_repo = self._make_mock_db_setup()
+        MockCardRepo.return_value = mock_card_repo
+        MockPriceRepo.return_value = mock_price_repo
+
+        service = BuildService()
+        service._run_smart_research = MagicMock(return_value=None)
+        service._generate_llm_synergy_matrix = MagicMock(return_value=None)
+
+        result = service.build_from_db(
+            commander_name="Test Green Commander",
+            budget=150.0,
+            db=mock_db,
+            no_edhrec=True,
+            smart=True,
+        )
+
+        service._run_smart_research.assert_called_once()
+        service._generate_llm_synergy_matrix.assert_not_called()
+        assert result.deck.total_cards() == 100

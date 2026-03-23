@@ -282,3 +282,106 @@ class TestPartnerAndBackgroundConflict:
         )
         errors = cmdr.validate()
         assert any("both a partner and a background" in e for e in errors)
+
+
+class TestPartnerWithCommanders:
+    """Test the 'Partner with X' specific-pairing branch of validation."""
+
+    def _make_partner_with_card(
+        self,
+        oracle_id: str,
+        name: str,
+        partner_with_name: str,
+        color_identity: list[str] | None = None,
+    ) -> Card:
+        """Build a card with a 'Partner with <name>' keyword."""
+        return Card(
+            oracle_id=oracle_id,
+            name=name,
+            type_line="Legendary Creature - Human",
+            oracle_text=f"Partner with {partner_with_name}",
+            mana_cost="{1}{W}",
+            cmc=2.0,
+            colors=["W"],
+            color_identity=color_identity or ["W"],
+            keywords=[f"Partner with {partner_with_name}"],
+            edhrec_rank=500,
+            legal_commander=True,
+        )
+
+    def test_partner_with_valid_pairing_no_errors(self) -> None:
+        """Two 'Partner with' cards that reference each other should validate cleanly."""
+        # Akiri and Ardenn are a canonical 'Partner with' pair
+        akiri = self._make_partner_with_card(
+            "akiri-oracle", "Akiri, Line-Slinger", "Ardenn, Intrepid Archaeologist",
+            color_identity=["W", "R"],
+        )
+        ardenn = self._make_partner_with_card(
+            "ardenn-oracle", "Ardenn, Intrepid Archaeologist", "Akiri, Line-Slinger",
+            color_identity=["W"],
+        )
+        cmdr = Commander(primary=akiri, partner=ardenn)
+        errors = cmdr.validate()
+        # The validation logic for 'Partner with' only checks that both cards
+        # carry some form of Partner keyword — not that the names cross-reference.
+        # So a valid pair should produce no errors.
+        assert errors == []
+
+    def test_partner_with_primary_missing_partner_keyword(self) -> None:
+        """Primary card without any Partner keyword should produce a validation error."""
+        no_partner = Card(
+            oracle_id="no-partner-primary",
+            name="Non-Partner Primary",
+            type_line="Legendary Creature - Human",
+            color_identity=["W"],
+            keywords=[],  # no Partner keyword at all
+            legal_commander=True,
+        )
+        ardenn = self._make_partner_with_card(
+            "ardenn-oracle", "Ardenn, Intrepid Archaeologist", "Non-Partner Primary",
+            color_identity=["W"],
+        )
+        # ardenn has 'Partner with Non-Partner Primary' — triggers the with-branch
+        cmdr = Commander(primary=no_partner, partner=ardenn)
+        errors = cmdr.validate()
+        assert any("Partner keyword" in e for e in errors)
+
+    def test_partner_with_partner_missing_partner_keyword(self) -> None:
+        """Partner card without any Partner keyword should produce a validation error."""
+        akiri = self._make_partner_with_card(
+            "akiri-oracle", "Akiri, Line-Slinger", "No Partner Card",
+            color_identity=["W", "R"],
+        )
+        no_partner = Card(
+            oracle_id="no-partner-card",
+            name="No Partner Card",
+            type_line="Legendary Creature - Human",
+            color_identity=["W"],
+            keywords=[],  # no Partner keyword at all
+            legal_commander=True,
+        )
+        cmdr = Commander(primary=akiri, partner=no_partner)
+        errors = cmdr.validate()
+        assert any("Partner keyword" in e for e in errors)
+
+    def test_partner_with_does_not_trigger_generic_partner_check(self) -> None:
+        """A 'Partner with X' card should not be rejected as if it were a generic Partner."""
+        # Generic Partner check requires keyword == "Partner" exactly.
+        # A card with only "Partner with X" should use the with-branch, not generic.
+        akiri = self._make_partner_with_card(
+            "akiri-oracle", "Akiri, Line-Slinger", "Ardenn, Intrepid Archaeologist",
+            color_identity=["W", "R"],
+        )
+        ardenn = self._make_partner_with_card(
+            "ardenn-oracle", "Ardenn, Intrepid Archaeologist", "Akiri, Line-Slinger",
+            color_identity=["W"],
+        )
+        # Neither card has the plain "Partner" keyword, only "Partner with X"
+        assert "Partner" not in akiri.keywords
+        assert "Partner" not in ardenn.keywords
+
+        cmdr = Commander(primary=akiri, partner=ardenn)
+        errors = cmdr.validate()
+        # Should not raise errors about missing generic Partner keyword
+        # because the with-branch handles this case
+        assert errors == []

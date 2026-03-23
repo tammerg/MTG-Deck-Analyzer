@@ -78,23 +78,18 @@ def search_cards(
     card_repo = CardRepository(db)
     printing_repo = PrintingRepository(db)
 
-    results = card_repo.search_cards(q)
-
-    if color:
-        color_set = set(color.upper())
-        results = [
-            c for c in results
-            if set(c.color_identity).issubset(color_set)
-        ]
-
-    if type:
-        results = [
-            c for c in results
-            if type.lower() in c.type_line.lower()
-        ]
-
-    total = len(results)
-    page = results[offset:offset + limit]
+    total = card_repo.count_search_cards(
+        q,
+        type_filter=type,
+        color_filter=color,
+    )
+    page = card_repo.search_cards(
+        q,
+        type_filter=type,
+        color_filter=color,
+        limit=limit,
+        offset=offset,
+    )
     return CardSearchResponse(
         results=[_card_to_response(c, printing_repo) for c in page],
         total=total,

@@ -90,20 +90,112 @@ class CardRepository:
             return None
         return Card.from_db_row(dict(row))
 
-    def search_cards(self, query: str) -> list[Card]:
-        """Search cards by name using LIKE matching.
+    def _build_search_conditions(
+        self,
+        query: str,
+        type_filter: str | None,
+        color_filter: str | None,
+    ) -> tuple[list[str], list[str]]:
+        """Build WHERE clause conditions and parameters for card search.
 
         Args:
-            query: Search string (will be wrapped in % wildcards).
+            query: Name search string (wrapped in % wildcards).
+            type_filter: Optional substring matched against type_line (LIKE).
+            color_filter: Optional color letters string; cards whose color
+                identity contains any color NOT in this set are excluded.
 
         Returns:
-            List of matching Card instances.
+            Tuple of (conditions, params) lists for use in a SQL WHERE clause.
         """
-        cursor = self._db.execute(
-            "SELECT * FROM cards WHERE name LIKE ? ORDER BY name",
-            (f"%{query}%",),
+        conditions: list[str] = ["name LIKE ?"]
+        params: list[str] = [f"%{query}%"]
+
+        if type_filter is not None:
+            conditions.append("type_line LIKE ?")
+            params.append(f"%{type_filter}%")
+
+        if color_filter is not None:
+            allowed = set(color_filter.upper())
+            all_colors = {"W", "U", "B", "R", "G"}
+            excluded = all_colors - allowed
+            for color in excluded:
+                # Exclude cards whose color_identity contains this color in any
+                # position of the comma-separated list (e.g. "W,U", "U", "U,G").
+                conditions.append(
+                    "(color_identity NOT LIKE ? AND color_identity NOT LIKE ? "
+                    "AND color_identity NOT LIKE ? AND color_identity != ?)"
+                )
+                params.extend(
+                    [f"%,{color},%", f"{color},%", f"%,{color}", color]
+                )
+
+        return conditions, params
+
+    def search_cards(
+        self,
+        query: str,
+        *,
+        type_filter: str | None = None,
+        color_filter: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[Card]:
+        """Search cards by name with optional SQL-level filtering and pagination.
+
+        All filtering and pagination is performed in SQL so that only the
+        requested page is loaded into Python, avoiding memory issues with large
+        card databases.
+
+        Args:
+            query: Search string matched against card names (LIKE).
+            type_filter: Optional substring matched against type_line (LIKE).
+            color_filter: Optional color letters string (e.g. "WU"); cards
+                whose color identity contains any color outside this set are
+                excluded.  Colorless cards always pass.
+            limit: Maximum number of results to return (default 50).
+            offset: Number of matching rows to skip (default 0).
+
+        Returns:
+            List of matching Card instances for the requested page.
+        """
+        conditions, params = self._build_search_conditions(
+            query, type_filter, color_filter
         )
+        where = " AND ".join(conditions)
+        sql = f"SELECT * FROM cards WHERE {where} ORDER BY name LIMIT ? OFFSET ?"
+        params_tuple = (*params, limit, offset)
+        cursor = self._db.execute(sql, params_tuple)
         return [Card.from_db_row(dict(row)) for row in cursor.fetchall()]
+
+    def count_search_cards(
+        self,
+        query: str,
+        *,
+        type_filter: str | None = None,
+        color_filter: str | None = None,
+    ) -> int:
+        """Count matching cards for a search without fetching rows.
+
+        Accepts the same filtering parameters as :meth:`search_cards` but
+        returns only the total row count, enabling accurate pagination totals
+        without an over-fetch.
+
+        Args:
+            query: Search string matched against card names (LIKE).
+            type_filter: Optional substring matched against type_line.
+            color_filter: Optional color letters string.
+
+        Returns:
+            Integer count of matching rows.
+        """
+        conditions, params = self._build_search_conditions(
+            query, type_filter, color_filter
+        )
+        where = " AND ".join(conditions)
+        sql = f"SELECT COUNT(*) FROM cards WHERE {where}"
+        cursor = self._db.execute(sql, tuple(params))
+        row = cursor.fetchone()
+        return int(row[0]) if row else 0
 
     def get_commander_legal_cards(self) -> list[Card]:
         """Return all cards that are legal in Commander format.

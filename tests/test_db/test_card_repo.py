@@ -110,6 +110,109 @@ class TestSearchCards:
         assert len(results) == 2
 
 
+class TestSearchCardsFiltered:
+    """Test search_cards with SQL-level type/color filtering and pagination."""
+
+    def test_type_filter_returns_only_matching_type(
+        self, card_repo: CardRepository, sample_cards_for_db: list[Card]
+    ) -> None:
+        card_repo.bulk_insert_cards(sample_cards_for_db)
+        # sample_cards_for_db has 3 Instants; artifact and land should be excluded
+        results = card_repo.search_cards("", type_filter="Instant")
+        names = [c.name for c in results]
+        assert "Counterspell" in names
+        assert "Swords to Plowshares" in names
+        assert "Lightning Bolt" in names
+        assert "Sol Ring" not in names
+        assert "Command Tower" not in names
+
+    def test_type_filter_case_insensitive(
+        self, card_repo: CardRepository, sample_cards_for_db: list[Card]
+    ) -> None:
+        card_repo.bulk_insert_cards(sample_cards_for_db)
+        results = card_repo.search_cards("", type_filter="instant")
+        assert len(results) == 3
+
+    def test_color_filter_excludes_outside_colors(
+        self, card_repo: CardRepository, sample_cards_for_db: list[Card]
+    ) -> None:
+        card_repo.bulk_insert_cards(sample_cards_for_db)
+        # color_filter="U" — only colorless and U cards should appear
+        results = card_repo.search_cards("", color_filter="U")
+        names = [c.name for c in results]
+        assert "Counterspell" in names        # color_identity=["U"]
+        assert "Sol Ring" in names            # colorless is subset of any color
+        assert "Command Tower" in names       # colorless
+        assert "Swords to Plowshares" not in names   # W
+        assert "Lightning Bolt" not in names          # R
+
+    def test_color_filter_multicolor(
+        self, card_repo: CardRepository, sample_cards_for_db: list[Card]
+    ) -> None:
+        card_repo.bulk_insert_cards(sample_cards_for_db)
+        results = card_repo.search_cards("", color_filter="WU")
+        names = [c.name for c in results]
+        assert "Swords to Plowshares" in names   # W subset of WU
+        assert "Counterspell" in names            # U subset of WU
+        assert "Sol Ring" in names               # colorless subset of anything
+        assert "Lightning Bolt" not in names     # R not in WU
+
+    def test_limit_restricts_result_count(
+        self, card_repo: CardRepository, sample_cards_for_db: list[Card]
+    ) -> None:
+        card_repo.bulk_insert_cards(sample_cards_for_db)
+        results = card_repo.search_cards("", limit=2)
+        assert len(results) == 2
+
+    def test_offset_skips_leading_results(
+        self, card_repo: CardRepository, sample_cards_for_db: list[Card]
+    ) -> None:
+        card_repo.bulk_insert_cards(sample_cards_for_db)
+        all_results = card_repo.search_cards("", limit=100)
+        paged = card_repo.search_cards("", offset=1, limit=100)
+        assert len(paged) == len(all_results) - 1
+        assert paged[0].name == all_results[1].name
+
+    def test_offset_beyond_results_returns_empty(
+        self, card_repo: CardRepository, sample_cards_for_db: list[Card]
+    ) -> None:
+        card_repo.bulk_insert_cards(sample_cards_for_db)
+        results = card_repo.search_cards("", offset=9999, limit=50)
+        assert results == []
+
+    def test_combined_name_type_color_filter(
+        self, card_repo: CardRepository, sample_cards_for_db: list[Card]
+    ) -> None:
+        card_repo.bulk_insert_cards(sample_cards_for_db)
+        # "spell" matches "Counterspell"; type=Instant; color=U
+        results = card_repo.search_cards(
+            "spell", type_filter="Instant", color_filter="U"
+        )
+        assert len(results) == 1
+        assert results[0].name == "Counterspell"
+
+    def test_count_reflects_full_filtered_total(
+        self, card_repo: CardRepository, sample_cards_for_db: list[Card]
+    ) -> None:
+        card_repo.bulk_insert_cards(sample_cards_for_db)
+        total = card_repo.count_search_cards("", type_filter="Instant")
+        assert total == 3
+
+    def test_count_with_name_filter(
+        self, card_repo: CardRepository, sample_cards_for_db: list[Card]
+    ) -> None:
+        card_repo.bulk_insert_cards(sample_cards_for_db)
+        total = card_repo.count_search_cards("Co")
+        assert total == 2
+
+    def test_count_no_match(
+        self, card_repo: CardRepository, sample_cards_for_db: list[Card]
+    ) -> None:
+        card_repo.bulk_insert_cards(sample_cards_for_db)
+        total = card_repo.count_search_cards("Nonexistent")
+        assert total == 0
+
+
 class TestCommanderLegalCards:
     """Test filtering for commander-legal cards."""
 

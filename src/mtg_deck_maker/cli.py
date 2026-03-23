@@ -954,6 +954,355 @@ def dev(host: str, port: int, frontend_port: int, no_frontend: bool) -> None:
         sys.exit(1)
 
 
+@cli.command()
+@click.option("--save", "save_path", type=click.Path(), help="Save results to JSON file.")
+@click.option("--budget", type=float, default=None, help="Override budget for all commanders.")
+def benchmark(save_path: str | None, budget: float | None) -> None:
+    """Run benchmark suite across reference commanders."""
+    try:
+        import json as json_mod
+        from datetime import datetime, timezone
+
+        from rich.console import Console
+        from rich.table import Table
+
+        from mtg_deck_maker.config import load_config
+        from mtg_deck_maker.db.database import Database
+        from mtg_deck_maker.metrics.benchmark import (
+            BenchmarkResult,
+            get_benchmark_commanders,
+            validate_benchmark_result,
+        )
+        from mtg_deck_maker.metrics.comparison import compute_metrics
+        from mtg_deck_maker.services.build_service import (
+            BuildService,
+            BuildServiceError,
+        )
+
+        console = Console()
+        config = load_config()
+
+        db_path = _get_db_path()
+        if not db_path.exists():
+            console.print(
+                "[red]Error:[/red] No card database found. "
+                "Run 'mtg-deck sync --full' first.",
+                highlight=False,
+            )
+            sys.exit(1)
+
+        commanders = get_benchmark_commanders()
+        console.print(
+            f"[bold]Running benchmark suite[/bold] ({len(commanders)} commanders)",
+            highlight=False,
+        )
+        console.print()
+
+        table = Table(title="Benchmark Results")
+        table.add_column("Commander", style="bold")
+        table.add_column("Archetype", style="cyan")
+        table.add_column("Cards", justify="right")
+        table.add_column("Price", justify="right", style="green")
+        table.add_column("Cat Coverage", justify="right")
+        table.add_column("Curve Smooth", justify="right")
+        table.add_column("EDHREC Overlap", justify="right")
+        table.add_column("Warnings")
+
+        pass_count = 0
+        fail_count = 0
+        json_commanders: dict[str, dict] = {}
+
+        with Database(db_path) as db:
+            service = BuildService(config=config)
+
+            for cmd in commanders:
+                cmd_budget = budget if budget is not None else cmd.budget
+                try:
+                    result = service.build_from_db(
+                        commander_name=cmd.name,
+                        budget=cmd_budget,
+                        db=db,
+                        seed=42,
+                        no_edhrec=True,
+                    )
+                except BuildServiceError as exc:
+                    console.print(
+                        f"[yellow]Warning:[/yellow] {cmd.name} failed to build: {exc}",
+                        highlight=False,
+                    )
+                    fail_count += 1
+                    table.add_row(
+                        cmd.name,
+                        cmd.archetype,
+                        "-",
+                        "-",
+                        "-",
+                        "-",
+                        "-",
+                        f"[red]Build failed: {exc}[/red]",
+                    )
+                    json_commanders[cmd.name] = {
+                        "archetype": cmd.archetype,
+                        "card_count": 0,
+                        "total_price": 0.0,
+                        "category_coverage": 0.0,
+                        "curve_smoothness": 0.0,
+                        "edhrec_overlap": 0.0,
+                        "warnings": [f"Build failed: {exc}"],
+                    }
+                    continue
+
+                deck = result.deck
+                metrics = compute_metrics(deck)
+
+                bench_result = BenchmarkResult(
+                    commander_name=cmd.name,
+                    metrics=metrics,
+                    deck_card_count=deck.total_cards(),
+                )
+                warnings = validate_benchmark_result(bench_result, cmd)
+
+                # Extract metric values
+                cc_val = (
+                    metrics.category_coverage.overall_pct
+                    if metrics.category_coverage is not None
+                    else None
+                )
+                cs_val = (
+                    metrics.curve_smoothness.smoothness
+                    if metrics.curve_smoothness is not None
+                    else None
+                )
+                eo_val = (
+                    metrics.edhrec_overlap.overlap_pct
+                    if metrics.edhrec_overlap is not None
+                    else None
+                )
+
+                cc_str = f"{cc_val * 100:.1f}%" if cc_val is not None else "N/A"
+                cs_str = f"{cs_val:.2f}" if cs_val is not None else "N/A"
+                eo_str = f"{eo_val * 100:.1f}%" if eo_val is not None else "N/A"
+
+                if warnings:
+                    fail_count += 1
+                    warn_str = f"[red]{len(warnings)} issue(s)[/red]"
+                else:
+                    pass_count += 1
+                    warn_str = "[green]PASS[/green]"
+
+                table.add_row(
+                    cmd.name,
+                    cmd.archetype,
+                    str(deck.total_cards()),
+                    f"${metrics.total_price:.2f}",
+                    cc_str,
+                    cs_str,
+                    eo_str,
+                    warn_str,
+                )
+
+                json_commanders[cmd.name] = {
+                    "archetype": cmd.archetype,
+                    "card_count": deck.total_cards(),
+                    "total_price": metrics.total_price,
+                    "category_coverage": cc_val if cc_val is not None else 0.0,
+                    "curve_smoothness": cs_val if cs_val is not None else 0.0,
+                    "edhrec_overlap": eo_val if eo_val is not None else 0.0,
+                    "warnings": warnings,
+                }
+
+                # Print per-commander warnings
+                for w in warnings:
+                    console.print(
+                        f"  [yellow]Warning:[/yellow] {w}", highlight=False
+                    )
+
+        console.print(table)
+        console.print()
+        console.print(
+            f"[bold]Summary:[/bold] {pass_count} passed, {fail_count} failed "
+            f"out of {len(commanders)} commanders.",
+            highlight=False,
+        )
+
+        if save_path:
+            json_data = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "commanders": json_commanders,
+            }
+            Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+            with open(save_path, "w") as f:
+                json_mod.dump(json_data, f, indent=2)
+            console.print(
+                f"\nResults saved to [bold]{save_path}[/bold]",
+                highlight=False,
+            )
+
+    except SystemExit:
+        raise
+    except Exception as exc:
+        click.echo(f"Error running benchmark: {exc}", err=True)
+        sys.exit(1)
+
+
+@cli.command()
+@click.option("--commanders", "-n", type=int, default=50, help="Number of commanders to train on.")
+@click.option("--output", "-o", type=click.Path(), default=None, help="Model output path.")
+@click.option("--test-split", type=float, default=0.2, help="Fraction of data for testing.")
+def train(commanders: int, output: str | None, test_split: float) -> None:
+    """Train the ML power prediction model from EDHREC data."""
+    try:
+        from rich.console import Console
+
+        console = Console()
+
+        np = __import__("numpy")
+        sklearn = __import__("sklearn")  # noqa: F841
+
+        from mtg_deck_maker.db.card_repo import CardRepository
+        from mtg_deck_maker.db.database import Database
+        from mtg_deck_maker.db.edhrec_repo import EdhrecRepository
+        from mtg_deck_maker.ml.trainer import (
+            DEFAULT_MODEL_PATH,
+            build_dataset,
+            evaluate_model,
+            save_model,
+            train_model,
+        )
+
+        db_path = _get_db_path()
+        if not db_path.exists():
+            console.print(
+                "[red]Error:[/red] No card database found. "
+                "Run 'mtg-deck sync --full' first.",
+                highlight=False,
+            )
+            sys.exit(1)
+
+        with Database(db_path) as db:
+            card_repo = CardRepository(db)
+            edhrec_repo = EdhrecRepository(db)
+            edhrec_repo.create_tables()
+
+            # Collect commanders with EDHREC data
+            console.print(
+                f"[bold]Training power prediction model[/bold] "
+                f"(up to {commanders} commanders)",
+                highlight=False,
+            )
+
+            commander_cards: list[tuple] = []
+
+            # Get distinct commander names from EDHREC data
+            cursor = db.execute(
+                "SELECT DISTINCT commander_name FROM edhrec_commander_cards"
+            )
+            cmd_names = [row[0] for row in cursor.fetchall()]
+
+            for cmd_name in cmd_names:
+                if len(commander_cards) >= commanders:
+                    break
+
+                cmd_card = card_repo.get_card_by_name(cmd_name)
+                if cmd_card is None:
+                    continue
+
+                top_cards = edhrec_repo.get_top_cards(cmd_name, limit=500)
+                if len(top_cards) < 10:
+                    continue
+
+                # Attach Card objects to EDHREC entries
+                for entry in top_cards:
+                    resolved = card_repo.get_card_by_name(entry.card_name)
+                    if resolved is not None:
+                        entry._card = resolved  # type: ignore[attr-defined]
+
+                commander_cards.append((cmd_card, top_cards))  # type: ignore[arg-type]
+
+            if not commander_cards:
+                console.print(
+                    "[red]Error:[/red] No commanders with EDHREC data found. "
+                    "Run 'mtg-deck build --smart <commander>' first to cache data.",
+                    highlight=False,
+                )
+                sys.exit(1)
+
+            console.print(
+                f"[dim]Found {len(commander_cards)} commanders with EDHREC data[/dim]",
+                highlight=False,
+            )
+
+            # Build card pool function for negative sampling
+            def card_pool_fn(commander: object) -> list:
+                from mtg_deck_maker.models.card import Card as CardModel
+                if isinstance(commander, CardModel):
+                    ci = list(commander.color_identity)
+                    return card_repo.get_cards_by_color_identity(ci)
+                return []
+
+            # Build dataset
+            console.print("[dim]Building dataset...[/dim]", highlight=False)
+            x, y = build_dataset(commander_cards, card_pool_fn=card_pool_fn)
+
+            if x.size == 0:
+                console.print(
+                    "[red]Error:[/red] No training samples generated.",
+                    highlight=False,
+                )
+                sys.exit(1)
+
+            console.print(
+                f"[dim]Dataset: {x.shape[0]} samples, {x.shape[1]} features[/dim]",
+                highlight=False,
+            )
+
+            # Train/test split
+            split_idx = int(len(x) * (1 - test_split))
+            indices = np.random.RandomState(42).permutation(len(x))
+            train_idx, test_idx = indices[:split_idx], indices[split_idx:]
+            x_train, x_test = x[train_idx], x[test_idx]
+            y_train, y_test = y[train_idx], y[test_idx]
+
+            console.print(
+                f"[dim]Training on {len(x_train)} samples, "
+                f"testing on {len(x_test)} samples[/dim]",
+                highlight=False,
+            )
+
+            # Train
+            console.print("[dim]Training model...[/dim]", highlight=False)
+            model = train_model(x_train, y_train)
+
+            # Evaluate
+            metrics = evaluate_model(model, x_test, y_test)
+            console.print()
+            console.print("[bold]Model Performance:[/bold]")
+            console.print(f"  MAE:  {metrics['mae']:.4f}")
+            console.print(f"  RMSE: {metrics['rmse']:.4f}")
+            console.print(f"  R²:   {metrics['r2']:.4f}")
+
+            # Save
+            save_path = save_model(model, output or DEFAULT_MODEL_PATH)
+            console.print()
+            console.print(
+                f"[bold green]Model saved to {save_path}[/bold green]",
+                highlight=False,
+            )
+
+    except ImportError as exc:
+        click.echo(
+            f"Error: ML dependencies not installed. "
+            f"Install with: pip install mtg-deck-maker[ml] ({exc})",
+            err=True,
+        )
+        sys.exit(1)
+    except SystemExit:
+        raise
+    except Exception as exc:
+        click.echo(f"Error training model: {exc}", err=True)
+        sys.exit(1)
+
+
 @cli.command("config")
 @click.option("--show", is_flag=True, default=False, help="Display current configuration.")
 def config_cmd(show: bool) -> None:

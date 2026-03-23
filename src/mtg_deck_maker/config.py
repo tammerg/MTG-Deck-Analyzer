@@ -66,7 +66,7 @@ class LLMConfig:
     timeout_s: float = 60.0
     max_retries: int = 3
     research_enabled: bool = True
-    priority_bonus: int = 500
+    priority_bonus: float = 0.5
 
 
 @dataclass(slots=True)
@@ -181,12 +181,12 @@ def _apply_toml_to_llm(config: LLMConfig, toml_data: dict) -> None:
         if field_name in section:
             setattr(config, field_name, str(section[field_name]))
 
-    int_fields = ["max_tokens", "max_retries", "priority_bonus"]
+    int_fields = ["max_tokens", "max_retries"]
     for field_name in int_fields:
         if field_name in section:
             setattr(config, field_name, int(section[field_name]))
 
-    float_fields = ["temperature", "timeout_s"]
+    float_fields = ["temperature", "timeout_s", "priority_bonus"]
     for field_name in float_fields:
         if field_name in section:
             setattr(config, field_name, float(section[field_name]))

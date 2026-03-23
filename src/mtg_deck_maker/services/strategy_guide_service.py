@@ -67,8 +67,12 @@ class StrategyGuideService:
                 commander_name = dc.card_name
                 break
 
-        # Fetch combos
-        combos = combo_repo.get_combos_for_cards(card_names)
+        # Fetch combos (table may not exist if sync hasn't been run)
+        try:
+            combos = combo_repo.get_combos_for_cards(card_names)
+        except Exception:
+            logger.debug("Combos table unavailable; proceeding without combos")
+            combos = []
 
         # Generate algorithmic guide
         guide = generate_strategy_guide(

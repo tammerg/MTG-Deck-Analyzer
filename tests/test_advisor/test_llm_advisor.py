@@ -75,6 +75,10 @@ class _FakeProvider(LLMProvider):
     def name(self) -> str:
         return "Fake"
 
+    @property
+    def model_id(self) -> str:
+        return "fake-model"
+
 
 class TestGetDeckAdviceWithProvider:
     def test_provider_used(self):

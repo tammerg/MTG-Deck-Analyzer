@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import Any
 
 from mtg_deck_maker.advisor.llm_provider import LLMProvider
 from mtg_deck_maker.advisor.retry import with_retries
@@ -23,6 +24,20 @@ class OpenAIProvider(LLMProvider):
     ) -> None:
         self._api_key = api_key or os.environ.get("OPENAI_API_KEY")
         self._model = model
+        self._client = None
+
+    def _get_client(self) -> Any:  # Returns openai.OpenAI
+        """Lazy-initialize the OpenAI client (created once and reused)."""
+        if self._client is None:
+            try:
+                import openai
+            except ImportError as exc:
+                raise RuntimeError(
+                    "OpenAI provider requires the 'openai' package. "
+                    "Install with: pip install mtg-deck-maker[openai]"
+                ) from exc
+            self._client = openai.OpenAI(api_key=self._api_key)
+        return self._client
 
     def chat(
         self,
@@ -32,21 +47,10 @@ class OpenAIProvider(LLMProvider):
         temperature: float = 0.7,
         timeout_s: float = 60.0,
     ) -> str:
-        try:
-            import openai
-        except ImportError:
-            raise RuntimeError(
-                "OpenAI provider requires the 'openai' package. "
-                "Install with: pip install mtg-deck-maker[openai]"
-            )
-
         if not self._api_key:
             raise RuntimeError("OPENAI_API_KEY is not set.")
 
-        client = openai.OpenAI(
-            api_key=self._api_key,
-            timeout=timeout_s,
-        )
+        client = self._get_client()
 
         def _call() -> str:
             response = client.chat.completions.create(
@@ -54,6 +58,7 @@ class OpenAIProvider(LLMProvider):
                 messages=messages,  # type: ignore[arg-type]
                 max_tokens=max_tokens,
                 temperature=temperature,
+                timeout=timeout_s,
             )
 
             if response.choices and response.choices[0].message.content:
@@ -74,3 +79,7 @@ class OpenAIProvider(LLMProvider):
     @property
     def name(self) -> str:
         return "OpenAI ChatGPT"
+
+    @property
+    def model_id(self) -> str:
+        return self._model

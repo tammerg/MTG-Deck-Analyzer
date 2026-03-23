@@ -31,6 +31,19 @@ class LLMProvider(ABC):
         """Provider display name (e.g. 'OpenAI ChatGPT')."""
         ...
 
+    @property
+    @abstractmethod
+    def model_id(self) -> str:
+        """Return the specific model identifier used for API calls.
+
+        This is the value passed to the provider's API (e.g.
+        ``'claude-sonnet-4-20250514'`` or ``'gpt-4o'``).  It is distinct from
+        ``name`` (the human-readable display label) and must be used wherever
+        a stable, unambiguous identifier is required — for instance as a cache
+        key for the LLM synergy repository.
+        """
+        ...
+
 
 def get_provider(
     preferred: str = "auto",

@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 
 from mtg_deck_maker.advisor.llm_provider import LLMProvider
+from mtg_deck_maker.advisor.parsing import extract_json_from_response
 from mtg_deck_maker.engine.categories import Category
 from mtg_deck_maker.models.card import Card
 
@@ -31,8 +31,6 @@ _FUNCTIONAL_CATEGORIES: frozenset[str] = frozenset({
 
 # Valid category names the LLM may return.
 _VALID_LLM_CATEGORIES: frozenset[str] = _FUNCTIONAL_CATEGORIES
-
-_FENCED_JSON_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)```")
 
 _SYSTEM_PROMPT = """\
 You are a Magic: The Gathering card categorization engine. Given a list of cards \
@@ -91,8 +89,7 @@ def _parse_llm_categories(raw: str) -> dict[str, list[tuple[str, float]]]:
         return {}
 
     # Strip fenced code blocks if present.
-    match = _FENCED_JSON_RE.search(raw)
-    text = match.group(1).strip() if match else raw.strip()
+    text = extract_json_from_response(raw)
 
     try:
         data = json.loads(text)

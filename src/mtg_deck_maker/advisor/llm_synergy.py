@@ -9,15 +9,13 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from itertools import combinations
 
 from mtg_deck_maker.advisor.llm_provider import LLMProvider
+from mtg_deck_maker.advisor.parsing import extract_json_from_response
 from mtg_deck_maker.models.card import Card
 
 logger = logging.getLogger(__name__)
-
-_FENCED_JSON_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)```")
 
 _SYSTEM_PROMPT = """\
 You are a Magic: The Gathering synergy evaluation engine. Given a commander \
@@ -74,8 +72,7 @@ def _parse_synergy_response(raw: str) -> dict[tuple[str, str], float]:
     if not raw:
         return {}
 
-    match = _FENCED_JSON_RE.search(raw)
-    text = match.group(1).strip() if match else raw.strip()
+    text = extract_json_from_response(raw)
 
     try:
         data = json.loads(text)

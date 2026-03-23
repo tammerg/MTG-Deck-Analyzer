@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
+from difflib import SequenceMatcher
+from types import ModuleType
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -355,12 +359,73 @@ class TestEdgeCases:
 
 
 # ---------------------------------------------------------------------------
+# Helpers: thefuzz stub using stdlib difflib
+# ---------------------------------------------------------------------------
+
+
+def _make_thefuzz_stub() -> ModuleType:
+    """Build a minimal thefuzz stub backed by difflib.SequenceMatcher.
+
+    The stub implements the subset of thefuzz.fuzz and thefuzz.process used by
+    fuzzy_match_card_name so the tests run without the real thefuzz package.
+    """
+
+    def _ratio(s1: str, s2: str) -> int:
+        return int(
+            SequenceMatcher(None, s1.lower(), s2.lower()).ratio() * 100
+        )
+
+    def _extract_one(
+        query: str,
+        choices: list[str],
+        scorer=None,
+    ) -> tuple[str, int, int] | None:
+        if not choices:
+            return None
+        scored = [
+            (choice, _ratio(query, choice), idx)
+            for idx, choice in enumerate(choices)
+        ]
+        return max(scored, key=lambda t: t[1])
+
+    fuzz_mod = ModuleType("thefuzz.fuzz")
+    fuzz_mod.ratio = _ratio  # type: ignore[attr-defined]
+
+    process_mod = ModuleType("thefuzz.process")
+    process_mod.extractOne = _extract_one  # type: ignore[attr-defined]
+
+    thefuzz_mod = ModuleType("thefuzz")
+    thefuzz_mod.fuzz = fuzz_mod  # type: ignore[attr-defined]
+    thefuzz_mod.process = process_mod  # type: ignore[attr-defined]
+
+    return thefuzz_mod
+
+
+@pytest.fixture(autouse=False)
+def stub_thefuzz(monkeypatch):
+    """Inject a stdlib-backed thefuzz stub into sys.modules for the test."""
+    stub = _make_thefuzz_stub()
+    monkeypatch.setitem(sys.modules, "thefuzz", stub)
+    monkeypatch.setitem(sys.modules, "thefuzz.fuzz", stub.fuzz)
+    monkeypatch.setitem(sys.modules, "thefuzz.process", stub.process)
+    yield
+
+
+# ---------------------------------------------------------------------------
 # Tests: Fuzzy Matching
 # ---------------------------------------------------------------------------
 
 
 class TestFuzzyMatching:
-    """Test fuzzy card name matching."""
+    """Test fuzzy card name matching.
+
+    Uses a stdlib difflib-backed stub for thefuzz so the suite runs without
+    the optional thefuzz package installed.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _inject_stub(self, stub_thefuzz):
+        """Apply the thefuzz stub for every test in this class."""
 
     def test_exact_match(self):
         known = ["Sol Ring", "Command Tower", "Swords to Plowshares"]

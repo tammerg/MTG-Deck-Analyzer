@@ -12,8 +12,10 @@ from mtg_deck_maker.advisor.anthropic_provider import AnthropicProvider
 class TestIsAvailable:
     def test_available_with_key_and_sdk(self):
         provider = AnthropicProvider(api_key="test-key")
-        # anthropic SDK is installed in this project
-        assert provider.is_available() is True
+        # Stub out the anthropic SDK so is_available() sees it as importable
+        # regardless of whether the package is installed in this environment.
+        with patch.dict("sys.modules", {"anthropic": MagicMock()}):
+            assert provider.is_available() is True
 
     def test_not_available_without_key(self):
         provider = AnthropicProvider(api_key=None)

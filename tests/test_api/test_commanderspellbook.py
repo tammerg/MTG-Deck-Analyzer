@@ -191,11 +191,38 @@ class TestFetchCombosForCards:
 
 # === Fallback loading tests ===
 
+SAMPLE_FALLBACK_COMBOS = [
+    {
+        "combo_id": "fb-001",
+        "card_names": ["Exquisite Blood", "Sanguine Bond"],
+        "result": "Infinite damage and lifegain",
+        "color_identity": ["B"],
+        "prerequisite": "Both permanents on the battlefield",
+        "description": "Whenever you gain life Sanguine Bond deals damage.",
+    },
+    {
+        "combo_id": "fb-002",
+        "card_names": ["Dramatic Reversal", "Isochron Scepter"],
+        "result": "Infinite mana",
+        "color_identity": ["U"],
+        "prerequisite": "Mana-producing nonland permanents",
+        "description": "Imprint Dramatic Reversal on Isochron Scepter.",
+    },
+]
+
 
 class TestLoadFallbackCombos:
-    def test_load_fallback_combos_with_required_fields(self) -> None:
-        """load_fallback_combos should return valid Combo objects with required fields."""
-        combos = load_fallback_combos()
+    def test_load_fallback_combos_with_required_fields(self, tmp_path) -> None:
+        """load_fallback_combos returns valid Combo objects when the fallback
+        file exists and contains well-formed entries."""
+        fallback_file = tmp_path / "combos.json"
+        fallback_file.write_text(json.dumps(SAMPLE_FALLBACK_COMBOS))
+
+        with patch(
+            "mtg_deck_maker.api.commanderspellbook.FALLBACK_PATH", fallback_file
+        ):
+            combos = load_fallback_combos()
+
         assert len(combos) > 0
         assert all(isinstance(c, Combo) for c in combos)
         for combo in combos:

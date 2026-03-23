@@ -19,6 +19,7 @@ from mtg_deck_maker.io.csv_export import export_deck_to_csv
 from mtg_deck_maker.models.card import Card
 from mtg_deck_maker.models.commander import Commander
 from mtg_deck_maker.models.deck import Deck
+from mtg_deck_maker.models.protocols import PowerPredictorProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +83,7 @@ class BuildService:
         priority_cards: list[str] | None = None,
         edhrec_inclusion: dict[str, float] | None = None,
         llm_synergy_matrix: dict[tuple[str, str], float] | None = None,
-        power_predictor: object | None = None,
+        power_predictor: PowerPredictorProtocol | None = None,
     ) -> BuildResult:
         """Execute the full deck build pipeline.
 
@@ -169,6 +170,182 @@ class BuildService:
             csv_output=csv_output,
         )
 
+    # ------------------------------------------------------------------
+    # build_from_db helpers (Steps 5-6c)
+    # ------------------------------------------------------------------
+
+    def _fetch_edhrec_data(
+        self,
+        cmd_name: str,
+        db: Database,
+    ) -> dict[str, float] | None:
+        """Fetch EDHREC inclusion data for a commander.
+
+        Checks the local cache first; fetches from the EDHREC API only when
+        the cache is missing or stale.
+
+        Args:
+            cmd_name: Exact name of the commander card.
+            db: Active database connection.
+
+        Returns:
+            Dict mapping card name to inclusion rate, or None on failure.
+        """
+        try:
+            from mtg_deck_maker.api.edhrec import fetch_commander_data
+            from mtg_deck_maker.db.edhrec_repo import EdhrecRepository
+            from mtg_deck_maker.utils.async_compat import run_async
+
+            edhrec_repo = EdhrecRepository(db)
+            edhrec_repo.create_tables()
+
+            if not edhrec_repo.has_data(cmd_name) or edhrec_repo.is_stale(cmd_name):
+                logger.debug("Fetching EDHREC data for %s", cmd_name)
+                edhrec_data = run_async(fetch_commander_data(cmd_name))
+                if edhrec_data:
+                    edhrec_repo.upsert_data(edhrec_data)
+                    logger.debug("Cached %d EDHREC cards for %s", len(edhrec_data), cmd_name)
+
+            if edhrec_repo.has_data(cmd_name):
+                top_cards = edhrec_repo.get_top_cards(cmd_name, limit=500)
+                return {c.card_name: c.inclusion_rate for c in top_cards}
+
+        except Exception as exc:
+            logger.warning("EDHREC data unavailable: %s", exc)
+
+        return None
+
+    def _run_smart_research(
+        self,
+        cmd_name: str,
+        budget: float,
+        oracle_text: str,
+        color_identity: list[str],
+        llm_provider: str,
+        llm_model: str | None,
+    ) -> list[str] | None:
+        """Run LLM-assisted commander research.
+
+        Args:
+            cmd_name: Commander name.
+            budget: Deck budget in USD.
+            oracle_text: Commander's oracle text.
+            color_identity: Commander's color identity.
+            llm_provider: Provider selector ("auto", "openai", "anthropic").
+            llm_model: Optional model override.
+
+        Returns:
+            List of priority card names, or None if research fails or is
+            unavailable.
+        """
+        try:
+            from mtg_deck_maker.advisor.llm_provider import get_provider
+            from mtg_deck_maker.services.research_service import ResearchService
+
+            llm = get_provider(llm_provider, model=llm_model)
+            if llm is None:
+                logger.debug("No LLM provider available, skipping smart research")
+                return None
+
+            logger.debug("Researching %s via %s", cmd_name, llm.name)
+            research_svc = ResearchService(provider=llm)
+            research = research_svc.research_commander(
+                commander_name=cmd_name,
+                oracle_text=oracle_text,
+                color_identity=color_identity,
+                budget=budget,
+            )
+            if research.parse_success and research.key_cards:
+                return research.key_cards
+            if not research.parse_success:
+                logger.warning("LLM response for %s could not be parsed", cmd_name)
+
+        except Exception as exc:
+            logger.warning("Smart build research failed: %s", exc)
+
+        return None
+
+    def _generate_llm_synergy_matrix(
+        self,
+        commander_name: str,
+        cmd_card: Card,
+        card_pool: list[Card],
+        llm_provider: str,
+        llm_model: str | None,
+        db: Database,
+    ) -> dict[tuple[str, str], float] | None:
+        """Generate or retrieve a cached LLM synergy matrix.
+
+        Args:
+            commander_name: Commander name (used as cache key).
+            cmd_card: Commander Card object.
+            card_pool: Candidate card pool (top 100 are used).
+            llm_provider: Provider selector.
+            llm_model: Optional model override.
+            db: Active database connection.
+
+        Returns:
+            Dict mapping (card_a, card_b) tuple to synergy score, or None on
+            failure.
+        """
+        try:
+            from mtg_deck_maker.advisor.llm_provider import get_provider
+            from mtg_deck_maker.advisor.llm_synergy import generate_synergy_matrix
+            from mtg_deck_maker.db.llm_synergy_repo import LLMSynergyRepo
+
+            llm = get_provider(llm_provider, model=llm_model)
+            if llm is None:
+                return None
+
+            synergy_repo = LLMSynergyRepo(db)
+            synergy_repo.create_tables()
+
+            # Issue #22: use model_id (the specific model identifier) as
+            # cache key, not the display name.
+            model_key = llm.model_id
+            card_names = [c.name for c in card_pool[:100]]
+            cached = synergy_repo.get_cached_matrix(
+                commander_name, card_names, model_key,
+            )
+            if cached:
+                logger.debug("Using %d cached LLM synergy scores", len(cached))
+                return cached
+
+            logger.debug("Generating LLM synergy matrix for %s", commander_name)
+            matrix = generate_synergy_matrix(
+                cmd_card,
+                card_pool[:100],
+                llm,
+                top_n=100,
+                batch_size=50,
+            )
+            if matrix:
+                synergy_repo.upsert_scores(commander_name, matrix, model_key)
+                logger.debug("Cached %d LLM synergy scores", len(matrix))
+            return matrix or None
+
+        except Exception as exc:
+            logger.warning("LLM synergy matrix failed: %s", exc)
+
+        return None
+
+    def _load_ml_predictor(self) -> PowerPredictorProtocol | None:
+        """Load the ML power predictor if the model file is available.
+
+        Returns:
+            A ready ``PowerPredictor`` instance, or None if unavailable.
+        """
+        try:
+            from mtg_deck_maker.ml.predictor import PowerPredictor
+
+            pp = PowerPredictor()
+            if pp.is_available():
+                return pp
+        except Exception as exc:
+            logger.debug("ML predictor not available: %s", exc)
+
+        return None
+
     def build_from_db(
         self,
         commander_name: str,
@@ -195,6 +372,8 @@ class BuildService:
             4. Load prices in bulk.
             5. Fetch EDHREC per-commander data (unless disabled).
             6. Run smart LLM research (if requested).
+            6b. Generate LLM synergy matrix (if smart + research succeeded).
+            6c. Load ML power predictor (auto, graceful degradation).
             7. Delegate to ``self.build()`` with all gathered data.
 
         Args:
@@ -272,121 +451,51 @@ class BuildService:
         # 5. EDHREC per-commander data
         edhrec_inclusion: dict[str, float] | None = None
         if not no_edhrec:
-            try:
-                from mtg_deck_maker.api.edhrec import fetch_commander_data
-                from mtg_deck_maker.db.edhrec_repo import EdhrecRepository
-
-                edhrec_repo = EdhrecRepository(db)
-                edhrec_repo.create_tables()
-
-                cmd_name = cmd_card.name
-                if not edhrec_repo.has_data(cmd_name) or edhrec_repo.is_stale(cmd_name):
-                    _progress("Fetching EDHREC data...")
-                    import asyncio
-
-                    edhrec_data = asyncio.run(fetch_commander_data(cmd_name))
-                    if edhrec_data:
-                        edhrec_repo.upsert_data(edhrec_data)
-                        _progress(f"Cached {len(edhrec_data)} EDHREC cards for {cmd_name}")
-
-                if edhrec_repo.has_data(cmd_name):
-                    top_cards = edhrec_repo.get_top_cards(cmd_name, limit=500)
-                    edhrec_inclusion = {
-                        c.card_name: c.inclusion_rate for c in top_cards
-                    }
-                    _progress(f"Using {len(edhrec_inclusion)} EDHREC card ratings")
-            except Exception as exc:
-                logger.warning("EDHREC data unavailable: %s", exc)
-                _progress(f"EDHREC data unavailable: {exc}")
+            _progress("Fetching EDHREC data...")
+            edhrec_inclusion = self._fetch_edhrec_data(cmd_card.name, db)
+            if edhrec_inclusion:
+                _progress(f"Using {len(edhrec_inclusion)} EDHREC card ratings")
+            else:
+                _progress("EDHREC data unavailable")
 
         # 6. Smart research
         priority_cards: list[str] | None = None
         if smart:
-            try:
-                from mtg_deck_maker.advisor.llm_provider import get_provider
-                from mtg_deck_maker.services.research_service import ResearchService
-
-                llm = get_provider(provider, model=llm_model)
-                if llm is None:
-                    _progress("No LLM provider available, skipping smart research")
-                else:
-                    _progress(f"Researching {commander_name} via {llm.name}...")
-                    research_svc = ResearchService(provider=llm)
-                    research = research_svc.research_commander(
-                        commander_name=commander_name,
-                        oracle_text=cmd_card.oracle_text,
-                        color_identity=color_identity,
-                        budget=budget,
-                    )
-                    if research.parse_success and research.key_cards:
-                        priority_cards = research.key_cards
-                        _progress(
-                            f"LLM recommended {len(priority_cards)} priority cards"
-                        )
-                    elif not research.parse_success:
-                        _progress("LLM response could not be parsed")
-            except Exception as exc:
-                logger.warning("Smart build research failed: %s", exc)
-                _progress(f"Smart build research failed: {exc}")
+            _progress(f"Researching {commander_name} with LLM...")
+            priority_cards = self._run_smart_research(
+                cmd_name=commander_name,
+                budget=budget,
+                oracle_text=cmd_card.oracle_text,
+                color_identity=color_identity,
+                llm_provider=provider,
+                llm_model=llm_model,
+            )
+            if priority_cards:
+                _progress(f"LLM recommended {len(priority_cards)} priority cards")
+            else:
+                _progress("Smart research unavailable or returned no results")
 
         # 6b. LLM synergy matrix (when smart mode + LLM available)
         llm_synergy_matrix: dict[tuple[str, str], float] | None = None
         if smart and priority_cards:
-            try:
-                from mtg_deck_maker.advisor.llm_provider import get_provider as _get_provider
-                from mtg_deck_maker.advisor.llm_synergy import (
-                    generate_synergy_matrix,
-                )
-                from mtg_deck_maker.db.llm_synergy_repo import LLMSynergyRepo
-
-                llm = _get_provider(provider, model=llm_model)
-                if llm is not None:
-                    synergy_repo = LLMSynergyRepo(db)
-                    synergy_repo.create_tables()
-
-                    model_name = llm_model or llm.name
-                    card_names = [c.name for c in card_pool[:100]]
-                    cached = synergy_repo.get_cached_matrix(
-                        commander_name, card_names, model_name,
-                    )
-                    if cached:
-                        llm_synergy_matrix = cached
-                        _progress(
-                            f"Using {len(cached)} cached LLM synergy scores"
-                        )
-                    else:
-                        _progress("Generating LLM synergy matrix...")
-                        llm_synergy_matrix = generate_synergy_matrix(
-                            cmd_card,
-                            card_pool[:100],
-                            llm,
-                            top_n=100,
-                            batch_size=50,
-                        )
-                        if llm_synergy_matrix:
-                            synergy_repo.upsert_scores(
-                                commander_name,
-                                llm_synergy_matrix,
-                                model_name,
-                            )
-                            _progress(
-                                f"Cached {len(llm_synergy_matrix)} LLM synergy scores"
-                            )
-            except Exception as exc:
-                logger.warning("LLM synergy matrix failed: %s", exc)
-                _progress(f"LLM synergy matrix unavailable: {exc}")
+            _progress("Generating LLM synergy matrix...")
+            llm_synergy_matrix = self._generate_llm_synergy_matrix(
+                commander_name=commander_name,
+                cmd_card=cmd_card,
+                card_pool=card_pool,
+                llm_provider=provider,
+                llm_model=llm_model,
+                db=db,
+            )
+            if llm_synergy_matrix:
+                _progress(f"Using {len(llm_synergy_matrix)} LLM synergy scores")
+            else:
+                _progress("LLM synergy matrix unavailable")
 
         # 6c. ML power predictor (auto-load if model file exists)
-        predictor: object | None = None
-        try:
-            from mtg_deck_maker.ml.predictor import PowerPredictor
-
-            pp = PowerPredictor()
-            if pp.is_available():
-                predictor = pp
-                _progress("Using ML power prediction model")
-        except Exception:
-            pass
+        predictor = self._load_ml_predictor()
+        if predictor is not None:
+            _progress("Using ML power prediction model")
 
         # 7. Build
         _progress("Building deck...")

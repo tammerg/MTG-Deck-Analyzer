@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from dataclasses import dataclass, field
 
 from mtg_deck_maker.advisor.llm_provider import LLMProvider, get_provider
+from mtg_deck_maker.advisor.parsing import extract_json_from_response
 
 logger = logging.getLogger(__name__)
 
@@ -62,8 +62,6 @@ strategy. Standard is 8-12 ramp, 8-10 draw, 5-7 removal, 2-4 board wipes, \
 Limit key_cards to 15 max, budget_staples to 10 max, combos to 5 max.
 If unsure about a section, use an empty list."""
 
-_JSON_BLOCK_RE = re.compile(r"```json\s*\n(.*?)\n\s*```", re.DOTALL)
-
 _VALID_CATEGORIES = frozenset({
     "ramp",
     "card_draw",
@@ -89,13 +87,16 @@ def _parse_research_response(raw: str, commander_name: str) -> ResearchResult:
         raw_response=raw,
     )
 
-    match = _JSON_BLOCK_RE.search(raw)
-    if not match:
+    text = extract_json_from_response(raw)
+    # If no fenced block was found, extract_json_from_response returns the
+    # stripped raw text; treat that as a parse failure when the response
+    # clearly has no JSON object (i.e. text == raw.strip()).
+    if text == raw.strip() and not text.startswith("{"):
         result.parse_success = False
         return result
 
     try:
-        data = json.loads(match.group(1))
+        data = json.loads(text)
     except (json.JSONDecodeError, ValueError):
         result.parse_success = False
         return result

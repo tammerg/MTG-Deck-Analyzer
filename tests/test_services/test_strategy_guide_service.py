@@ -161,3 +161,32 @@ class TestStrategyGuideService:
             guide = service.generate(1, mock_db, llm_provider=None, num_sims=50)
 
         assert guide.llm_narrative is None
+
+    def test_narrative_uses_system_role_message(self):
+        """LLM call must include a system role message for the persona."""
+        mock_db, mock_deck_repo, mock_card_repo, mock_combo_repo = self._setup_mocks()
+        mock_llm = MagicMock()
+        mock_llm.chat.return_value = "Narrative text."
+
+        with (
+            patch("mtg_deck_maker.services.strategy_guide_service.DeckRepository", return_value=mock_deck_repo),
+            patch("mtg_deck_maker.services.strategy_guide_service.CardRepository", return_value=mock_card_repo),
+            patch("mtg_deck_maker.services.strategy_guide_service.ComboRepository", return_value=mock_combo_repo),
+        ):
+            service = StrategyGuideService()
+            service.generate(1, mock_db, llm_provider=mock_llm, num_sims=50)
+
+        messages = mock_llm.chat.call_args[0][0]  # first positional arg is messages list
+        roles = [m["role"] for m in messages]
+        assert "system" in roles, "LLM call must include a 'system' role message"
+        assert "user" in roles, "LLM call must include a 'user' role message"
+
+        system_msgs = [m for m in messages if m["role"] == "system"]
+        user_msgs = [m for m in messages if m["role"] == "user"]
+        # Persona/instructions belong in system; the deck context in user
+        assert len(system_msgs) == 1
+        assert len(user_msgs) == 1
+        # The system message should describe the analyst persona
+        assert "analyst" in system_msgs[0]["content"].lower() or "magic" in system_msgs[0]["content"].lower()
+        # The user message should contain the deck analysis context
+        assert "archetype" in user_msgs[0]["content"].lower() or "win" in user_msgs[0]["content"].lower()

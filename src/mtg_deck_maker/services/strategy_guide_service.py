@@ -49,11 +49,13 @@ class StrategyGuideService:
         if deck is None:
             raise ValueError(f"Deck {deck_id} not found.")
 
-        # Build card lookup
+        # Build card lookup — single batch query instead of N+1
+        cards_by_id = card_repo.get_cards_by_ids(
+            [dc.card_id for dc in deck.cards]
+        )
         card_lookup = {}
         card_names: list[str] = []
-        for dc in deck.cards:
-            card = card_repo.get_card_by_id(dc.card_id)
+        for card in cards_by_id.values():
             if card is not None:
                 card_lookup[card.name] = card
                 card_names.append(card.name)
@@ -120,15 +122,22 @@ class StrategyGuideService:
 
         messages = [
             {
-                "role": "user",
+                "role": "system",
                 "content": (
                     "You are an expert Magic: The Gathering Commander deck analyst. "
+                    "Write clear, specific, and actionable strategy narratives that "
+                    "help pilots understand their deck's game plan and key decisions."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
                     "Based on the following deck analysis data, write a 2-3 paragraph "
                     "strategy narrative that explains the deck's game plan, strengths, "
                     "and key decisions a pilot should make. Be specific and actionable.\n\n"
                     f"{context}"
                 ),
-            }
+            },
         ]
 
         return provider.chat(messages, max_tokens=512, temperature=0.7)

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+import logging
+
 from unittest.mock import MagicMock, patch
 
 from mtg_deck_maker.config import AppConfig
@@ -370,3 +372,93 @@ class TestBuildFromDb:
                 db=mock_db,
                 partner_name="Nonexistent Partner",
             )
+
+    @patch("mtg_deck_maker.db.card_repo.CardRepository")
+    @patch("mtg_deck_maker.db.price_repo.PriceRepository")
+    def test_ml_predictor_failure_logged_at_debug(self, MockPriceRepo, MockCardRepo):
+        """A failing ML predictor import should be logged at DEBUG, not silenced."""
+        mock_db, mock_card_repo, mock_price_repo = self._setup_mock_db()
+        MockCardRepo.return_value = mock_card_repo
+        MockPriceRepo.return_value = mock_price_repo
+
+        service = BuildService()
+        # Verify that _load_ml_predictor catches and logs at DEBUG (not WARNING)
+        # by triggering an ImportError inside the method.
+        with patch("mtg_deck_maker.services.build_service.logger") as mock_logger:
+            # Patch builtins.__import__ won't work cleanly; patch the lazy import
+            # by making PowerPredictor itself raise on instantiation.
+            with patch(
+                "mtg_deck_maker.ml.predictor.PowerPredictor",
+                side_effect=ImportError("no module named mtg_deck_maker.ml"),
+            ):
+                result = service.build_from_db(
+                    commander_name="Test Green Commander",
+                    budget=150.0,
+                    db=mock_db,
+                )
+
+        # Build should succeed regardless of ML predictor failure
+        assert result.deck.total_cards() == 100
+        # debug should have been called with the ML predictor message
+        debug_calls = [str(c) for c in mock_logger.debug.call_args_list]
+        assert any("ML predictor" in c for c in debug_calls)
+
+
+class TestBuildServiceHelpers:
+    """Unit tests for the extracted private helper methods."""
+
+    def test_load_ml_predictor_returns_none_when_unavailable(self):
+        """_load_ml_predictor should return None gracefully when ML is absent."""
+        service = BuildService()
+        with patch(
+            "mtg_deck_maker.ml.predictor.PowerPredictor",
+            side_effect=ImportError("missing"),
+        ):
+            result = service._load_ml_predictor()
+        assert result is None
+
+    def test_load_ml_predictor_returns_none_when_not_available(self):
+        """Returns None when PowerPredictor.is_available() is False."""
+        service = BuildService()
+        mock_pp = MagicMock()
+        mock_pp.is_available.return_value = False
+        with patch("mtg_deck_maker.ml.predictor.PowerPredictor", return_value=mock_pp):
+            result = service._load_ml_predictor()
+        assert result is None
+
+    def test_load_ml_predictor_returns_predictor_when_available(self):
+        """Returns the predictor instance when is_available() is True."""
+        service = BuildService()
+        mock_pp = MagicMock()
+        mock_pp.is_available.return_value = True
+        with patch("mtg_deck_maker.ml.predictor.PowerPredictor", return_value=mock_pp):
+            result = service._load_ml_predictor()
+        assert result is mock_pp
+
+    def test_run_smart_research_returns_none_when_no_provider(self):
+        """Returns None gracefully when no LLM provider is configured."""
+        service = BuildService()
+        with patch(
+            "mtg_deck_maker.advisor.llm_provider.get_provider",
+            return_value=None,
+        ):
+            result = service._run_smart_research(
+                cmd_name="Test Commander",
+                budget=100.0,
+                oracle_text="",
+                color_identity=["G"],
+                llm_provider="auto",
+                llm_model=None,
+            )
+        assert result is None
+
+    def test_fetch_edhrec_data_returns_none_on_exception(self):
+        """Returns None when EDHREC raises an exception."""
+        service = BuildService()
+        mock_db = MagicMock()
+        with patch(
+            "mtg_deck_maker.db.edhrec_repo.EdhrecRepository",
+            side_effect=Exception("network error"),
+        ):
+            result = service._fetch_edhrec_data("Test Commander", mock_db)
+        assert result is None

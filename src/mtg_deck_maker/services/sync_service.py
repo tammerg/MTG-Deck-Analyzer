@@ -6,7 +6,6 @@ the local SQLite database with cards, printings, and cached prices.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import tempfile
@@ -188,31 +187,43 @@ def _process_cards(
                     row,
                 )
                 printing_db_id = cursor.lastrowid
+                if not printing_db_id:
+                    row = db.execute(
+                        "SELECT id FROM printings WHERE scryfall_id = ?",
+                        (printing.scryfall_id,)
+                    ).fetchone()
+                    if row:
+                        printing_db_id = row[0]
+                    else:
+                        continue
                 result.printings_added += 1
 
-            # Upsert prices - delete stale then insert fresh
+            # Upsert prices - delete stale then insert fresh via executemany
             price_records = _extract_prices(raw_card)
-            if price_records:
+            if price_records and printing_db_id is not None:
                 db.execute(
                     "DELETE FROM prices WHERE printing_id = ? AND source = 'scryfall'",
                     (printing_db_id,),
                 )
-                for price_info in price_records:
-                    db.execute(
-                        """INSERT INTO prices (
-                            printing_id, source, currency, price, finish,
-                            retrieved_at
-                        ) VALUES (?, ?, ?, ?, ?, ?)""",
-                        (
-                            printing_db_id,
-                            price_info["source"],
-                            price_info["currency"],
-                            price_info["price"],
-                            price_info["finish"],
-                            now,
-                        ),
+                price_rows = [
+                    (
+                        printing_db_id,
+                        price_info["source"],
+                        price_info["currency"],
+                        price_info["price"],
+                        price_info["finish"],
+                        now,
                     )
-                    result.prices_added += 1
+                    for price_info in price_records
+                ]
+                db.executemany(
+                    """INSERT INTO prices (
+                        printing_id, source, currency, price, finish,
+                        retrieved_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)""",
+                    price_rows,
+                )
+                result.prices_added += len(price_rows)
 
         except Exception as exc:
             card_name = raw_card.get("name", "unknown")
@@ -269,7 +280,9 @@ class SyncService:
         Returns:
             SyncResult with statistics about the operation.
         """
-        return asyncio.run(self._run_sync(full, progress_callback))
+        from mtg_deck_maker.utils.async_compat import run_async
+
+        return run_async(self._run_sync(full, progress_callback))
 
     async def _run_sync(
         self,

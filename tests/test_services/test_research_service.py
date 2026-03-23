@@ -30,6 +30,10 @@ class _FakeProvider(LLMProvider):
     def name(self) -> str:
         return "Fake Provider"
 
+    @property
+    def model_id(self) -> str:
+        return "fake-model-id"
+
 
 _GOOD_JSON = '''\
 Here is my analysis:

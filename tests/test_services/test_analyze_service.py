@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import tempfile
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -96,3 +98,63 @@ class TestAnalyzeService:
         service = AnalyzeService()
         with pytest.raises(ValueError, match="No cards found"):
             service.analyze_from_csv(str(csv_file))
+
+    def test_analyze_from_csv_without_db_logs_warning(self, tmp_path, caplog):
+        """analyze_from_csv with no db should warn that results may be inaccurate."""
+        csv_content = (
+            "Quantity,Card Name,Category,Mana Cost,CMC,Type,Price (USD),Set,Set Code,Notes\n"
+            "1,Sol Ring,ramp,{1},1,Artifact,3.00,,,\n"
+        )
+        csv_file = tmp_path / "deck.csv"
+        csv_file.write_text(csv_content)
+
+        service = AnalyzeService()
+        with caplog.at_level(logging.WARNING, logger="mtg_deck_maker.services.analyze_service"):
+            service.analyze_from_csv(str(csv_file))
+
+        assert any("No database" in r.message for r in caplog.records)
+
+    def test_analyze_from_csv_with_db_enriches_cards(self, tmp_path):
+        """analyze_from_csv with a db should look up each card for real data."""
+        csv_content = (
+            "Quantity,Card Name,Category,Mana Cost,CMC,Type,Price (USD),Set,Set Code,Notes\n"
+            "1,Sol Ring,ramp,{1},1,Artifact,3.00,,,\n"
+        )
+        csv_file = tmp_path / "deck.csv"
+        csv_file.write_text(csv_content)
+
+        real_sol_ring = _make_card(
+            "Sol Ring",
+            type_line="Artifact",
+            oracle_text="{T}: Add {C}{C}.",
+            mana_cost="{1}",
+            cmc=1.0,
+            card_id=1,
+        )
+
+        mock_card_repo = MagicMock()
+        mock_card_repo.get_card_by_name.return_value = real_sol_ring
+
+        service = AnalyzeService()
+        analysis = service.analyze_from_csv(str(csv_file), card_repo=mock_card_repo)
+
+        mock_card_repo.get_card_by_name.assert_called_once_with("Sol Ring")
+        assert isinstance(analysis, DeckAnalysis)
+
+    def test_analyze_from_csv_db_missing_card_falls_back_to_hollow(self, tmp_path):
+        """When db lookup misses a card, hollow card should still be used."""
+        csv_content = (
+            "Quantity,Card Name,Category,Mana Cost,CMC,Type,Price (USD),Set,Set Code,Notes\n"
+            "1,Unknown Card,other,{X},0,Sorcery,0.00,,,\n"
+        )
+        csv_file = tmp_path / "deck.csv"
+        csv_file.write_text(csv_content)
+
+        mock_card_repo = MagicMock()
+        mock_card_repo.get_card_by_name.return_value = None  # not found in DB
+
+        service = AnalyzeService()
+        analysis = service.analyze_from_csv(str(csv_file), card_repo=mock_card_repo)
+
+        assert isinstance(analysis, DeckAnalysis)
+        mock_card_repo.get_card_by_name.assert_called_once_with("Unknown Card")

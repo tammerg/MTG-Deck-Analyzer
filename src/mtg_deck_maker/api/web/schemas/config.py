@@ -47,7 +47,7 @@ class LLMConfigResponse(BaseModel):
     timeout_s: float
     max_retries: int
     research_enabled: bool
-    priority_bonus: int
+    priority_bonus: float
 
 
 class ConfigResponse(BaseModel):
@@ -101,7 +101,7 @@ class LLMConfigUpdate(BaseModel):
     timeout_s: float | None = None
     max_retries: int | None = None
     research_enabled: bool | None = None
-    priority_bonus: int | None = None
+    priority_bonus: float | None = None
 
 
 class ConfigUpdateRequest(BaseModel):

@@ -169,6 +169,34 @@ class CardRepository:
         cursor = self._db.execute(sql, tuple(params))
         return [Card.from_db_row(dict(row)) for row in cursor.fetchall()]
 
+    def get_cards_by_ids(self, card_ids: list[int]) -> dict[int, Card]:
+        """Look up multiple cards by their database IDs in a single query.
+
+        Uses chunked queries to stay within SQLite's variable limit.
+
+        Args:
+            card_ids: List of card database primary keys.
+
+        Returns:
+            Dict mapping card_id to Card instance. Missing IDs are omitted.
+        """
+        if not card_ids:
+            return {}
+        result: dict[int, Card] = {}
+        chunk_size = 900  # SQLite variable limit safety margin
+        for i in range(0, len(card_ids), chunk_size):
+            chunk = card_ids[i : i + chunk_size]
+            placeholders = ",".join("?" for _ in chunk)
+            cursor = self._db.execute(
+                f"SELECT * FROM cards WHERE id IN ({placeholders})",
+                tuple(chunk),
+            )
+            for row in cursor.fetchall():
+                card = Card.from_db_row(dict(row))
+                if card.id is not None:
+                    result[card.id] = card
+        return result
+
     def bulk_insert_cards(self, cards: list[Card]) -> int:
         """Insert multiple cards in a single transaction.
 

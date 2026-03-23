@@ -38,22 +38,25 @@ class DeckRepository:
         )
         deck_id = cursor.lastrowid
 
-        for dc in deck.cards:
-            self._db.execute(
-                """
-                INSERT INTO deck_cards
-                    (deck_id, card_id, quantity, category, is_commander, is_companion)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    deck_id,
-                    dc.card_id,
-                    dc.quantity,
-                    dc.category,
-                    int(dc.is_commander),
-                    int(dc.is_companion),
-                ),
+        card_rows = [
+            (
+                deck_id,
+                dc.card_id,
+                dc.quantity,
+                dc.category,
+                int(dc.is_commander),
+                int(dc.is_companion),
             )
+            for dc in deck.cards
+        ]
+        self._db.executemany(
+            """
+            INSERT INTO deck_cards
+                (deck_id, card_id, quantity, category, is_commander, is_companion)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            card_rows,
+        )
 
         self._db.commit()
         return deck_id  # type: ignore[return-value]

@@ -24,6 +24,7 @@ from mtg_deck_maker.db.database import Database
 from mtg_deck_maker.db.deck_repo import DeckRepository
 from mtg_deck_maker.db.price_repo import PriceRepository
 from mtg_deck_maker.db.printing_repo import PrintingRepository
+from mtg_deck_maker.models.card import Card
 from mtg_deck_maker.models.deck import Deck, DeckCard
 from mtg_deck_maker.services.build_service import BuildService, BuildServiceError
 
@@ -32,52 +33,21 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["decks"])
 
 
-def _build_deck_card_response(
-    dc: DeckCard,
+def _resolve_deck_cards(
+    deck: Deck,
     card_repo: CardRepository,
-    printing_repo: PrintingRepository,
-    price_repo: PriceRepository,
-) -> DeckCardResponse:
-    """Convert a DeckCard model to a DeckCardResponse.
+) -> list[Card]:
+    """Fetch all Card objects for a deck's DeckCard entries in one batch query.
 
-    Enriches with card metadata and image URL where available.
+    Args:
+        deck: The Deck whose cards should be resolved.
+        card_repo: Card repository used for the batch fetch.
+
+    Returns:
+        List of Card objects for each DeckCard that resolves to a known card.
     """
-    image_url: str | None = None
-    mana_cost = dc.card_name  # fallback
-    type_line = ""
-    oracle_text = ""
-
-    if dc.card_id:
-        card = card_repo.get_card_by_id(dc.card_id)
-        if card is not None:
-            mana_cost = card.mana_cost
-            type_line = card.type_line
-            oracle_text = card.oracle_text
-
-        primary = printing_repo.get_primary_printing(dc.card_id)
-        if primary is not None:
-            image_url = _scryfall_image_url(primary.scryfall_id)
-
-    price = dc.price
-    if price == 0.0 and dc.card_id:
-        fetched = price_repo.get_cheapest_price(dc.card_id)
-        if fetched is not None:
-            price = fetched
-
-    return DeckCardResponse(
-        card_id=dc.card_id,
-        quantity=dc.quantity,
-        category=dc.category,
-        is_commander=dc.is_commander,
-        card_name=dc.card_name,
-        cmc=dc.cmc,
-        colors=dc.colors,
-        price=price,
-        mana_cost=mana_cost,
-        type_line=type_line,
-        oracle_text=oracle_text,
-        image_url=image_url,
-    )
+    cards_by_id = card_repo.get_cards_by_ids([dc.card_id for dc in deck.cards])
+    return list(cards_by_id.values())
 
 
 def _deck_to_response(
@@ -86,7 +56,10 @@ def _deck_to_response(
     printing_repo: PrintingRepository,
     price_repo: PriceRepository,
 ) -> DeckResponse:
-    """Convert a Deck model to a DeckResponse.
+    """Convert a Deck model to a DeckResponse using batch DB queries.
+
+    Fetches all cards, primary printings, and cheapest prices in 3 queries
+    total regardless of deck size, eliminating the N+1 pattern.
 
     Args:
         deck: The Deck model to convert.
@@ -97,10 +70,55 @@ def _deck_to_response(
     Returns:
         DeckResponse with all computed fields populated.
     """
-    card_responses = [
-        _build_deck_card_response(dc, card_repo, printing_repo, price_repo)
-        for dc in deck.cards
+    card_ids = [dc.card_id for dc in deck.cards if dc.card_id]
+
+    cards_by_id = card_repo.get_cards_by_ids(card_ids)
+    printings_by_card_id = printing_repo.get_primary_printings(card_ids)
+    # Only fetch prices for cards whose DeckCard price is unset (0.0)
+    missing_price_ids = [
+        dc.card_id for dc in deck.cards if dc.card_id and dc.price == 0.0
     ]
+    fetched_prices = price_repo.get_cheapest_prices(missing_price_ids)
+
+    card_responses: list[DeckCardResponse] = []
+    for dc in deck.cards:
+        image_url: str | None = None
+        mana_cost = ""
+        type_line = ""
+        oracle_text = ""
+
+        if dc.card_id:
+            card = cards_by_id.get(dc.card_id)
+            if card is not None:
+                mana_cost = card.mana_cost
+                type_line = card.type_line
+                oracle_text = card.oracle_text
+
+            primary = printings_by_card_id.get(dc.card_id)
+            if primary is not None:
+                image_url = _scryfall_image_url(primary.scryfall_id)
+
+        price = dc.price
+        if price == 0.0 and dc.card_id:
+            price = fetched_prices.get(dc.card_id, 0.0)
+
+        card_responses.append(
+            DeckCardResponse(
+                card_id=dc.card_id,
+                quantity=dc.quantity,
+                category=dc.category,
+                is_commander=dc.is_commander,
+                card_name=dc.card_name,
+                cmc=dc.cmc,
+                colors=dc.colors,
+                price=price,
+                mana_cost=mana_cost,
+                type_line=type_line,
+                oracle_text=oracle_text,
+                image_url=image_url,
+            )
+        )
+
     commanders = [c for c in card_responses if c.is_commander]
 
     return DeckResponse(
@@ -155,8 +173,8 @@ def build_deck(
             db=db,
             partner_name=req.partner,
             seed=req.seed,
-            smart=getattr(req, "smart", False),
-            provider=getattr(req, "provider", "auto"),
+            smart=req.smart,
+            provider=req.provider,
         )
     except CommanderNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -181,7 +199,7 @@ def build_deck(
     # Merge price data from in-memory build result into saved deck cards
     price_by_card_id: dict[int, float] = {}
     for dc in built_deck.cards:
-        if dc.card_id and dc.price:
+        if dc.card_id is not None and dc.price is not None and dc.price > 0.0:
             price_by_card_id[dc.card_id] = dc.price
 
     for dc in saved_deck.cards:
@@ -346,13 +364,7 @@ def analyze_deck(
     if deck is None:
         raise HTTPException(status_code=404, detail=f"Deck {deck_id} not found.")
 
-    # Resolve card objects for analysis
-    cards = []
-    for dc in deck.cards:
-        card = card_repo.get_card_by_id(dc.card_id)
-        if card is not None:
-            cards.append(card)
-
+    cards = _resolve_deck_cards(deck, card_repo)
     categories = bulk_categorize(cards)
     analysis = _analyze_deck(cards, categories)
 
@@ -401,12 +413,7 @@ def advise_deck(
     if deck is None:
         raise HTTPException(status_code=404, detail=f"Deck {deck_id} not found.")
 
-    cards = []
-    for dc in deck.cards:
-        card = card_repo.get_card_by_id(dc.card_id)
-        if card is not None:
-            cards.append(card)
-
+    cards = _resolve_deck_cards(deck, card_repo)
     categories = bulk_categorize(cards)
     analysis = _analyze_deck(cards, categories)
 

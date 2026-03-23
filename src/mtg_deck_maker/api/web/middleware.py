@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,10 +11,15 @@ from fastapi.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
 
-_ALLOWED_ORIGINS = [
+_DEFAULT_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 ]
+_ALLOWED_ORIGINS: list[str] = [
+    o.strip()
+    for o in os.environ.get("MTG_CORS_ORIGINS", "").split(",")
+    if o.strip()
+] or _DEFAULT_ORIGINS
 
 
 def register_middleware(app: FastAPI) -> None:

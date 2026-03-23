@@ -100,6 +100,51 @@ class PrintingRepository:
             return None
         return Printing.from_db_row(dict(row))
 
+    def get_primary_printings(self, card_ids: list[int]) -> dict[int, Printing]:
+        """Get the best printing for image display for multiple cards in one query.
+
+        For each card, selects the English, non-promo printing ordered by most
+        recent release using a window function. Uses chunked queries to stay
+        within SQLite's variable limit.
+
+        Args:
+            card_ids: List of card database IDs.
+
+        Returns:
+            Dict mapping card_id to the preferred Printing instance.
+            Cards without printings are omitted.
+        """
+        if not card_ids:
+            return {}
+        result: dict[int, Printing] = {}
+        chunk_size = 900  # SQLite variable limit safety margin
+        for i in range(0, len(card_ids), chunk_size):
+            chunk = card_ids[i : i + chunk_size]
+            placeholders = ",".join("?" for _ in chunk)
+            cursor = self._db.execute(
+                f"""
+                SELECT * FROM (
+                    SELECT *,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY card_id
+                            ORDER BY
+                                CASE WHEN lang = 'en' THEN 0 ELSE 1 END ASC,
+                                CASE WHEN is_promo = 0 THEN 0 ELSE 1 END ASC,
+                                released_at DESC,
+                                id ASC
+                        ) AS rn
+                    FROM printings
+                    WHERE card_id IN ({placeholders})
+                ) ranked
+                WHERE rn = 1
+                """,
+                tuple(chunk),
+            )
+            for row in cursor.fetchall():
+                printing = Printing.from_db_row(dict(row))
+                result[printing.card_id] = printing
+        return result
+
     def bulk_insert_printings(self, printings: list[Printing]) -> int:
         """Insert multiple printings in a single transaction.
 

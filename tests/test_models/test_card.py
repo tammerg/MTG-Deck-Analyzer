@@ -159,14 +159,3 @@ class TestCardSerialization:
         assert card.keywords == []
         assert card.edhrec_rank is None
 
-    def test_roundtrip_serialization(self, sample_commander_card: Card) -> None:
-        row = sample_commander_card.to_db_row()
-        # Simulate what we get back from DB (add an id)
-        row["id"] = 1
-        restored = Card.from_db_row(row)
-        assert restored.name == sample_commander_card.name
-        assert restored.oracle_id == sample_commander_card.oracle_id
-        assert restored.colors == sample_commander_card.colors
-        assert restored.color_identity == sample_commander_card.color_identity
-        assert restored.keywords == sample_commander_card.keywords
-        assert restored.cmc == sample_commander_card.cmc

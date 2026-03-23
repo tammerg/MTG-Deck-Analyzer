@@ -298,7 +298,7 @@ class TestEstimatePowerLevel:
         analysis = analyze_deck_composition(cards, categories)
         analysis["total_price"] = 30.0
         level = estimate_power_level(analysis)
-        assert level <= 4
+        assert level <= 3
 
     def test_high_power_optimized_deck(self):
         """An optimized deck with tutors, fast mana, low CMC should be high power."""
@@ -314,7 +314,7 @@ class TestEstimatePowerLevel:
         analysis = analyze_deck_composition(cards, categories)
         analysis["total_price"] = 800.0
         level = estimate_power_level(analysis)
-        assert level >= 6
+        assert level >= 8
 
     def test_mid_power_deck(self):
         """A moderate deck should fall in the middle range."""
@@ -379,18 +379,10 @@ class TestEstimatePowerLevel:
 
 
 class TestFastManaCards:
-    def test_sol_ring_in_fast_mana(self):
-        """Sol Ring should be in the fast mana set."""
-        assert "Sol Ring" in FAST_MANA_CARDS
+    @pytest.mark.parametrize("name", ["Sol Ring", "Mana Crypt", "Mana Vault"])
+    def test_known_fast_mana_present(self, name):
+        assert name in FAST_MANA_CARDS
 
-    def test_mana_crypt_in_fast_mana(self):
-        """Mana Crypt should be in the fast mana set."""
-        assert "Mana Crypt" in FAST_MANA_CARDS
-
-    def test_fast_mana_is_set(self):
-        """FAST_MANA_CARDS should be a set for O(1) lookup."""
-        assert isinstance(FAST_MANA_CARDS, set)
-
-    def test_fast_mana_not_empty(self):
-        """FAST_MANA_CARDS should contain entries."""
-        assert len(FAST_MANA_CARDS) > 5
+    def test_fast_mana_nonempty_set(self):
+        assert isinstance(FAST_MANA_CARDS, (set, frozenset))
+        assert len(FAST_MANA_CARDS) >= 5

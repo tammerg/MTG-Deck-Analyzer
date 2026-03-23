@@ -84,20 +84,6 @@ class TestPerfectCurve:
         assert result.smoothness == pytest.approx(1.0, abs=1e-9)
         assert result.rmse == pytest.approx(0.0, abs=1e-9)
         assert result.total_nonland == 100
-
-    def test_actual_matches_ideal(self) -> None:
-        cards: list[DeckCard] = []
-        card_id = 1
-        for cmc_bucket, pct in IDEAL_CURVE.items():
-            count = round(pct * 100)
-            cards.append(
-                _nonland_card(cmc=float(cmc_bucket), quantity=count, card_id=card_id)
-            )
-            card_id += 1
-
-        deck = _make_deck(cards)
-        result = curve_smoothness(deck, IDEAL_CURVE)
-
         for bucket, pct in IDEAL_CURVE.items():
             assert result.actual_distribution[bucket] == pytest.approx(pct, abs=0.01)
 

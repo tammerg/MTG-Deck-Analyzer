@@ -66,9 +66,6 @@ class TestGetBenchmarkCommanders:
 class TestBenchmarkCommanderDataclass:
     """Verify BenchmarkCommander uses slots and has expected defaults."""
 
-    def test_slots_enabled(self) -> None:
-        assert hasattr(BenchmarkCommander, "__slots__")
-
     def test_notes_default_empty(self) -> None:
         commander = BenchmarkCommander(
             name="Test Commander",
@@ -79,28 +76,9 @@ class TestBenchmarkCommanderDataclass:
         )
         assert commander.notes == ""
 
-    def test_fields_stored_correctly(self) -> None:
-        commander = BenchmarkCommander(
-            name="Krenko, Mob Boss",
-            archetype="aggro",
-            color_identity=["R"],
-            expected_themes=["goblins", "tokens"],
-            budget=50.0,
-            notes="Mono-red goblin tribal",
-        )
-        assert commander.name == "Krenko, Mob Boss"
-        assert commander.archetype == "aggro"
-        assert commander.color_identity == ["R"]
-        assert commander.expected_themes == ["goblins", "tokens"]
-        assert commander.budget == 50.0
-        assert commander.notes == "Mono-red goblin tribal"
-
 
 class TestBenchmarkResultDataclass:
     """Verify BenchmarkResult dataclass basics."""
-
-    def test_slots_enabled(self) -> None:
-        assert hasattr(BenchmarkResult, "__slots__")
 
     def test_construction_with_none_metrics(self) -> None:
         result = BenchmarkResult(

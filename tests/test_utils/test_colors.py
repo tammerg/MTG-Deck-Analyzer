@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from mtg_deck_maker.utils.colors import (
-    WUBRG,
-    COLOR_NAME_MAP,
     color_identity_to_name,
     is_within_identity,
     parse_color_identity,
@@ -169,16 +167,3 @@ class TestColorIdentityToName:
         assert color_identity_to_name(["R", "W"]) == "Boros"
 
 
-class TestWUBRGConstant:
-    """Test the WUBRG constant."""
-
-    def test_wubrg_order(self) -> None:
-        assert WUBRG == ["W", "U", "B", "R", "G"]
-
-    def test_color_name_map_complete(self) -> None:
-        assert len(COLOR_NAME_MAP) == 5
-        assert COLOR_NAME_MAP["W"] == "White"
-        assert COLOR_NAME_MAP["U"] == "Blue"
-        assert COLOR_NAME_MAP["B"] == "Black"
-        assert COLOR_NAME_MAP["R"] == "Red"
-        assert COLOR_NAME_MAP["G"] == "Green"

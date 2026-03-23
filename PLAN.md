@@ -4,7 +4,7 @@
 
 MTG Deck Maker is a CLI + Web API application that generates optimized Magic: The Gathering Commander decklists at various budget tiers. Given a commander and budget, it produces a complete 100-card deck using multi-factor scoring (synergy, power, price), archetype-adaptive category targets, mana curve shaping, combo awareness, and per-commander EDHREC data. It also provides deck analysis, upgrade recommendations, and LLM-powered advice via OpenAI or Anthropic.
 
-**Current state:** Core engine complete through P1 algorithm improvements. Multi-provider LLM integration (Phase 2 + 2.5) fully implemented. Frontend scaffolded. 870 tests passing, zero failures. All work uncommitted.
+**Current state:** Core engine complete through P4 algorithm improvements. LLM synergy matrix (W2d) and ML predictor (W3b partial) integrated into engine. Strategy Guide feature fully implemented. Multi-provider LLM integration (Phase 2 + 2.5) fully implemented. Frontend complete. 1129 Python tests + 58 frontend tests passing. All work committed.
 
 ## Architecture Reference
 
@@ -16,13 +16,16 @@ MTG Deck Maker is a CLI + Web API application that generates optimized Magic: Th
 
 ```
 src/mtg_deck_maker/
-├── models/          card.py, deck.py, combo.py, edhrec_data.py
-├── engine/          deck_builder.py, synergy.py, categories.py, budget_optimizer.py, power_level.py, mana_base.py
-├── services/        build_service.py, advise_service.py, research_service.py, analyze_service.py, sync_service.py, upgrade_service.py
-├── advisor/         llm_provider.py, anthropic_provider.py, openai_provider.py, retry.py, llm_advisor.py, analyzer.py
+├── models/          card.py, deck.py, combo.py, edhrec_data.py, strategy_guide.py, scored_candidate.py, commander.py, printing.py
+├── engine/          deck_builder.py, synergy.py, synergy_audit.py, categories.py, budget_optimizer.py, power_level.py, mana_base.py, strategy_guide.py
+├── services/        build_service.py, advise_service.py, research_service.py, analyze_service.py, sync_service.py, upgrade_service.py, strategy_guide_service.py
+├── advisor/         llm_provider.py, anthropic_provider.py, openai_provider.py, retry.py, llm_advisor.py, llm_categorizer.py, llm_synergy.py, analyzer.py, upgrade.py
+├── ml/              features.py, trainer.py, predictor.py
+├── metrics/         category_coverage.py, curve_smoothness.py, edhrec_overlap.py, budget_efficiency.py, synergy_density.py, comparison.py, benchmark.py
+├── utils/           colors.py, formatting.py
 ├── api/             commanderspellbook.py, edhrec.py
-│   └── web/         FastAPI routers
-├── db/              database.py, combo_repo.py, edhrec_repo.py, printing_repo.py, deck_repo.py
+│   └── web/         FastAPI routers + Pydantic schemas
+├── db/              database.py, combo_repo.py, edhrec_repo.py, printing_repo.py, deck_repo.py, card_repo.py, price_repo.py, llm_synergy_repo.py
 ├── cli.py           Click CLI (build, analyze, upgrade, advise, research, validate, sync, search, config)
 └── config.py        AppConfig (CLI > env > TOML > defaults)
 ```
@@ -47,7 +50,7 @@ src/mtg_deck_maker/
 | P1 Algorithm | Curve shaping, regex expansion (28 patterns), win conditions (20 patterns), redundancy awareness | Done |
 | Frontend | React 19 + Vite + all pages + FastAPI API layer | Done |
 
-**Tests:** 947 Python tests + 58 frontend tests passing, zero failures
+**Tests:** 1129 Python tests + 58 frontend tests passing, zero failures
 
 ---
 
@@ -108,12 +111,30 @@ See [FRONTEND_PLAN.md](./FRONTEND_PLAN.md) for the complete 5-phase spec:
 - [x] Frontend tests (vitest + testing-library, 58 tests across utils + components)
 - [x] Code-splitting (lazy routes + vendor chunks, main bundle 192KB down from 514KB)
 
-### Priority 6: Algorithm Improvements (P3)
+### Priority 6: Strategy Guide Feature — DONE
+
+See [STRATEGY_GUIDE_PLAN.md](./STRATEGY_GUIDE_PLAN.md) for the full spec (all items implemented):
+
+- [x] Models — `models/strategy_guide.py` (HandSample, HandSimulationResult, WinPath, GamePhase, KeySynergy, StrategyGuide)
+- [x] Engine — `engine/strategy_guide.py` (opening hand simulation, win condition analysis, game phase planning, key synergy identification)
+- [x] Service — `services/strategy_guide_service.py` (DB loading, LLM narrative enrichment with graceful degradation)
+- [x] API — POST `/decks/{deck_id}/strategy-guide` endpoint with Pydantic schemas
+- [x] Frontend — `StrategyGuide.tsx` component, `useStrategyGuide.ts` hook, mounted in DeckViewPage
+
+### Priority 7: Algorithm Improvements (P3) — PARTIAL
 
 Long-term algorithm work from [ALGORITHM_ROADMAP.md](./ALGORITHM_ROADMAP.md):
 
-- [ ] **W3b: Trained scoring model** — Train on EDHREC decklists. Features: card keywords, commander keywords, theme overlap, category. Target: inclusion rate.
-- [ ] **W2d: LLM synergy matrix** — Use LLM to generate pairwise synergy scores for top 200 candidates per commander. Cache per commander.
+- [x] **W2d: LLM synergy matrix** — `advisor/llm_synergy.py` + `db/llm_synergy_repo.py`, integrated into budget optimizer via `_compute_llm_synergy_bonus()`
+- [~] **W3b: Trained scoring model** — `ml/features.py`, `ml/trainer.py`, `ml/predictor.py` implemented; predictor integrated into `deck_builder.py`. Training pipeline present but requires numpy (optional dependency). Partially complete.
+
+### Priority 8: ML Integration — IN PROGRESS
+
+- [x] Feature engineering for card-commander pairs (`ml/features.py`)
+- [x] Model training pipeline (`ml/trainer.py`)
+- [x] Power predictor for card-commander scoring (`ml/predictor.py`)
+- [x] Engine integration — ML predictions used in `deck_builder.py` card selection
+- [ ] Model training on EDHREC data (requires numpy, not yet run at scale)
 
 ---
 
@@ -125,4 +146,4 @@ Long-term algorithm work from [ALGORITHM_ROADMAP.md](./ALGORITHM_ROADMAP.md):
 - **Deck algorithm quality is the core value proposition** — every change evaluated against ALGORITHM_ROADMAP.md
 - **Graceful degradation** — every external dependency has a fallback path (Tier 0-5 ladder)
 - **No breaking changes** to CLI interface without major version bump
-- **870 tests**, zero failures as baseline
+- **1129 Python tests + 58 frontend tests**, zero failures as baseline

@@ -136,8 +136,8 @@ Only matches "you win the game" and "each opponent loses". Misses:
 | W7 | Deck-internal synergy | High | High | **P2** | **DONE** — audit_synergy() in synergy_audit.py: pairwise audit, outlier detection, swap suggestions |
 | W1b | LLM-assisted categorization | High | Medium | **P2** | **DONE** — LLMCategorizer in advisor/llm_categorizer.py: batched LLM categorization with parsing + validation |
 | W4b | LLM-suggested category ratios | Medium | Low | **P2** | **DONE** — category_targets field in ResearchResult, LLM prompt extended, validated parsing |
-| W3b | Trained scoring model | Very High | Very High | **P3** | Open |
-| W2d | LLM synergy matrix | High | Medium | **P3** | Open |
+| W3b | Trained scoring model | Very High | Very High | **P3** | **Partial** — ml/features.py, ml/trainer.py, ml/predictor.py implemented + engine integration. Training pipeline needs numpy (optional dep). |
+| W2d | LLM synergy matrix | High | Medium | **P3** | **DONE** — advisor/llm_synergy.py + db/llm_synergy_repo.py + budget_optimizer integration |
 
 ## Measurement: How Do We Know Decks Got Better?
 
@@ -181,10 +181,10 @@ Build a `DeckComparison` tool that:
 ```
 Tier 0 (no data):     Random legal cards within color identity
 Tier 1 (Scryfall):    Regex categorization + EDHREC rank + budget optimizer
-Tier 2 (+ combos):    Combo DB + tribal matching + curve shaping + archetype profiles + redundancy awareness  <-- CURRENT
-Tier 3 (+ EDHREC):    Per-commander inclusion rates + average list comparison  <-- CURRENT (optional)
-Tier 4 (+ LLM):       LLM-guided categorization + synergy matrix + adaptive targets
-Tier 5 (+ learning):  Trained models from EDHREC data, user feedback loop
+Tier 2 (+ combos):    Combo DB + tribal matching + curve shaping + archetype profiles + redundancy awareness
+Tier 3 (+ EDHREC):    Per-commander inclusion rates + average list comparison
+Tier 4 (+ LLM):       LLM-guided categorization + synergy matrix + adaptive targets  <-- CURRENT
+Tier 5 (+ learning):  Trained models from EDHREC data, user feedback loop  <-- PARTIALLY REACHED (ML predictor integrated, training pipeline present)
 ```
 
 Each tier should be independently testable and the system should always work at Tier 1 even if higher-tier data sources are unavailable.

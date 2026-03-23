@@ -81,8 +81,8 @@ src/mtg_deck_maker/
 
 - **Consequences:**
   - Decks are customized per commander via archetype detection and per-commander EDHREC data
-  - Algorithm currently at **Tier 2-3** on the graceful degradation ladder (see ALGORITHM_ROADMAP.md)
-  - Known limitation: synergy is commander-to-card only, not card-to-card (see W2c, W7 in ALGORITHM_ROADMAP.md)
+  - Algorithm currently at **Tier 4** on the graceful degradation ladder (see ALGORITHM_ROADMAP.md), partially reaching Tier 5 with ML predictor integration
+  - Synergy now includes commander-to-card, card-to-card pairwise synergy (W2c), deck-internal synergy audit (W7), and LLM-generated synergy matrices (W2d)
 
 ---
 
@@ -121,9 +121,9 @@ These are known issues tracked for resolution. See PLAN.md for prioritized fix s
   Tier 0: Random legal cards within color identity (no external data)
   Tier 1: Regex categorization + EDHREC global rank + budget optimizer (Scryfall only)
   Tier 2: + Combo DB + tribal matching + curve shaping + archetype profiles (+ CommanderSpellbook)
-  Tier 3: + Per-commander inclusion rates (+ EDHREC per-commander)  ← CURRENT
-  Tier 4: + LLM-guided categorization + synergy matrix + adaptive targets
-  Tier 5: + Trained models from EDHREC data, user feedback loop
+  Tier 3: + Per-commander inclusion rates (+ EDHREC per-commander)
+  Tier 4: + LLM-guided categorization + synergy matrix + adaptive targets  ← CURRENT
+  Tier 5: + Trained models from EDHREC data, user feedback loop  ← PARTIALLY REACHED
   ```
 
 - **Consequences:**

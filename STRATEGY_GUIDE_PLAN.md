@@ -1,5 +1,7 @@
 # Deck Strategy Guide Feature
 
+> **COMPLETED** -- All items implemented (2026-03-23). Models, engine, service, API endpoint, frontend component, hooks, and tests are all in place.
+
 Post-build analysis that explains win conditions, simulates opening hands (Monte Carlo), and outlines the game plan by phase. Algorithmic base always works; LLM narrative enrichment when API keys are available.
 
 ## New Files

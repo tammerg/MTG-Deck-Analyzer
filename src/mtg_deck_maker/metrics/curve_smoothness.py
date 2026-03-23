@@ -8,6 +8,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from mtg_deck_maker.engine.categories import Category
 from mtg_deck_maker.models.deck import Deck
 
 _MAX_BUCKET = 7
@@ -49,7 +50,7 @@ def curve_smoothness(
     # Count cards per CMC bucket, excluding lands, commanders, companions.
     counts: dict[int, int] = {b: 0 for b in range(_MAX_BUCKET + 1)}
     for card in deck.cards:
-        if card.category == "land" or card.is_commander or card.is_companion:
+        if card.category == Category.LAND.value or card.is_commander or card.is_companion:
             continue
         counts[_bucket(card.cmc)] += card.quantity
 

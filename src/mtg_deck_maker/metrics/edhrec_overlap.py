@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from mtg_deck_maker.engine.categories import Category
 from mtg_deck_maker.models.deck import Deck
 
 
@@ -50,7 +51,7 @@ def edhrec_overlap(
         for card in deck.cards
         if not card.is_commander
         and not card.is_companion
-        and card.category != "land"
+        and card.category != Category.LAND.value
     ]
 
     total = len(eligible)

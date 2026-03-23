@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from itertools import combinations
 
+from mtg_deck_maker.engine.categories import Category
 from mtg_deck_maker.engine.synergy import compute_pairwise_synergy
 from mtg_deck_maker.models.card import Card
 from mtg_deck_maker.models.deck import Deck
@@ -58,7 +59,7 @@ def synergy_density(
     for deck_card in deck.cards:
         if deck_card.is_commander or deck_card.is_companion:
             continue
-        if deck_card.category == "land":
+        if deck_card.category == Category.LAND.value:
             continue
         full_card = card_lookup.get(deck_card.card_name)
         if full_card is not None:

@@ -82,6 +82,93 @@ async def fetch_commander_data(
     return _parse_response(commander_name, data)
 
 
+async def fetch_commander_full_data(
+    commander_name: str,
+    min_inclusion: float = 0.01,
+) -> list[EdhrecCommanderData]:
+    """Fetch extended per-commander card data with lower inclusion threshold.
+
+    Similar to fetch_commander_data but includes cards with lower inclusion
+    rates (down to min_inclusion), useful for ML training data.
+
+    Args:
+        commander_name: The commander name to look up.
+        min_inclusion: Minimum inclusion rate to include (default 1%).
+
+    Returns:
+        List of EdhrecCommanderData filtered to min_inclusion threshold.
+    """
+    all_data = await fetch_commander_data(commander_name)
+    return [d for d in all_data if d.inclusion_rate >= min_inclusion]
+
+
+async def fetch_training_commanders(
+    min_decks: int = 500,
+) -> list[str]:
+    """Fetch a list of popular commanders suitable for ML training.
+
+    Queries EDHREC for top commanders by deck count.
+
+    Args:
+        min_decks: Minimum number of decks to qualify.
+
+    Returns:
+        List of commander names. Returns empty list on failure.
+    """
+    url = "https://json.edhrec.com/pages/commanders/year.json"
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(REQUEST_TIMEOUT),
+            headers={"User-Agent": USER_AGENT},
+            follow_redirects=True,
+        ) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            data = response.json()
+    except Exception:
+        logger.warning(
+            "Failed to fetch training commanders from %s", url
+        )
+        return []
+
+    return _parse_training_commanders(data, min_decks)
+
+
+def _parse_training_commanders(data: dict, min_decks: int) -> list[str]:
+    """Parse the EDHREC commanders list response.
+
+    Args:
+        data: Parsed JSON dict from EDHREC.
+        min_decks: Minimum deck count threshold.
+
+    Returns:
+        List of commander names meeting the threshold.
+    """
+    try:
+        cardlists = data.get("cardlists", [])
+        if not cardlists:
+            return []
+
+        commanders: list[str] = []
+
+        for cardlist in cardlists:
+            cardviews = cardlist.get("cardviews", [])
+            if not isinstance(cardviews, list):
+                continue
+
+            for entry in cardviews:
+                name = entry.get("name", "")
+                num_decks = int(entry.get("num_decks", 0))
+                if name and num_decks >= min_decks:
+                    commanders.append(name)
+
+        return commanders
+    except Exception:
+        logger.warning("Failed to parse training commanders response")
+        return []
+
+
 def _parse_response(
     commander_name: str,
     data: dict,

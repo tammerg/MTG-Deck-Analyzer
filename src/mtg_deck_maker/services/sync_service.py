@@ -159,7 +159,7 @@ def _process_cards(
                         )""",
                         row,
                     )
-                    card_db_id = cursor.lastrowid
+                    card_db_id = cursor.lastrowid or 0
                     oracle_id_cache[card.oracle_id] = card_db_id
                     result.cards_added += 1
 

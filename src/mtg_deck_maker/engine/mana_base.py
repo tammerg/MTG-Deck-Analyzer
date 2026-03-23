@@ -94,7 +94,7 @@ def calculate_basic_land_distribution(
             return {}
         per_color = total_basics // len(colors)
         remainder = total_basics % len(colors)
-        distribution = {c: per_color for c in colors}
+        distribution: dict[str, int] = {c: per_color for c in colors}
         # Distribute remainder to colors with most pips (alphabetically for ties)
         for i, color in enumerate(sorted(colors)):
             if i < remainder:
@@ -102,7 +102,7 @@ def calculate_basic_land_distribution(
         return distribution
 
     # Proportional distribution with rounding
-    distribution: dict[str, int] = {}
+    distribution = {}
     allocated = 0
 
     # Sort colors for deterministic behavior

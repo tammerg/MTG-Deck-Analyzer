@@ -54,15 +54,15 @@ def get_provider(
         kwargs["model"] = model
 
     if preferred == "openai":
-        provider = OpenAIProvider(**kwargs)
-        return provider if provider.is_available() else None
+        p: LLMProvider = OpenAIProvider(**kwargs)
+        return p if p.is_available() else None
     elif preferred == "anthropic":
-        provider = AnthropicProvider(**kwargs)
-        return provider if provider.is_available() else None
+        p = AnthropicProvider(**kwargs)
+        return p if p.is_available() else None
     else:
         # Auto: try OpenAI first, then Anthropic
         for cls in (OpenAIProvider, AnthropicProvider):
-            provider = cls(**kwargs)
-            if provider.is_available():
-                return provider
+            p = cls(**kwargs)
+            if p.is_available():
+                return p
         return None

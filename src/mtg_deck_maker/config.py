@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -211,7 +212,7 @@ def _apply_env_vars(config: AppConfig) -> None:
     - MTG_LLM_TIMEOUT -> llm.timeout_s
     - MTG_LLM_MAX_RETRIES -> llm.max_retries
     """
-    env_map = {
+    env_map: dict[str, tuple[str, str, type | Callable[[str], object]]] = {
         "MTG_DATA_DIR": ("general", "data_dir", str),
         "MTG_CACHE_TTL_HOURS": ("general", "cache_ttl_hours", int),
         "MTG_OFFLINE_MODE": ("general", "offline_mode", _parse_bool),

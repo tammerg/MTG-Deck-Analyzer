@@ -4,13 +4,15 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from mtg_deck_maker.api.web.schemas.deck import ProviderLiteral
+
 
 class ResearchRequest(BaseModel):
     """Request body for commander research."""
 
-    commander: str
+    commander: str = Field(min_length=1, max_length=200)
     budget: float | None = None
-    provider: str = "auto"
+    provider: ProviderLiteral = "auto"
 
 
 class ResearchResponse(BaseModel):

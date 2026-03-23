@@ -311,6 +311,7 @@ class TestComparisonSummaryValues:
             "curve_smoothness",
             "edhrec_overlap",
             "budget_efficiency",
+            "synergy_density",
             "overall",
         }
         assert set(result.summary.keys()) == expected_keys

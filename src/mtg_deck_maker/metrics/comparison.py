@@ -20,6 +20,11 @@ from mtg_deck_maker.metrics.edhrec_overlap import (
     EDHRECOverlapResult,
     edhrec_overlap,
 )
+from mtg_deck_maker.metrics.synergy_density import (
+    SynergyDensityResult,
+    synergy_density,
+)
+from mtg_deck_maker.models.card import Card
 from mtg_deck_maker.models.deck import Deck
 
 _TOLERANCE = 0.01
@@ -37,6 +42,7 @@ class DeckMetrics:
     curve_smoothness: CurveSmoothnessResult | None
     edhrec_overlap: EDHRECOverlapResult | None
     budget_efficiency: BudgetEfficiencyResult | None
+    synergy_density: SynergyDensityResult | None
 
 
 @dataclass(slots=True)
@@ -97,12 +103,14 @@ def compute_metrics(
     category_targets: dict[str, tuple[int, int]] | None = None,
     ideal_curve: dict[int, float] | None = None,
     edhrec_inclusion: dict[str, float] | None = None,
+    card_lookup: dict[str, Card] | None = None,
 ) -> DeckMetrics:
     """Compute all available metrics for a single deck."""
     cc = category_coverage(deck, category_targets) if category_targets is not None else None
     cs = curve_smoothness(deck, ideal_curve) if ideal_curve is not None else None
     eo = edhrec_overlap(deck, edhrec_inclusion) if edhrec_inclusion is not None else None
     be = budget_efficiency(deck, edhrec_inclusion)
+    sd = synergy_density(deck, card_lookup) if card_lookup is not None else None
 
     return DeckMetrics(
         deck_name=deck.name,
@@ -113,6 +121,7 @@ def compute_metrics(
         curve_smoothness=cs,
         edhrec_overlap=eo,
         budget_efficiency=be,
+        synergy_density=sd,
     )
 
 
@@ -122,10 +131,15 @@ def compare_decks(
     category_targets: dict[str, tuple[int, int]] | None = None,
     ideal_curve: dict[int, float] | None = None,
     edhrec_inclusion: dict[str, float] | None = None,
+    card_lookup: dict[str, Card] | None = None,
 ) -> ComparisonResult:
     """Compare two decks across all metrics."""
-    metrics_a = compute_metrics(deck_a, category_targets, ideal_curve, edhrec_inclusion)
-    metrics_b = compute_metrics(deck_b, category_targets, ideal_curve, edhrec_inclusion)
+    metrics_a = compute_metrics(
+        deck_a, category_targets, ideal_curve, edhrec_inclusion, card_lookup,
+    )
+    metrics_b = compute_metrics(
+        deck_b, category_targets, ideal_curve, edhrec_inclusion, card_lookup,
+    )
 
     summary: dict[str, str] = {}
 
@@ -141,8 +155,11 @@ def compare_decks(
     summary["budget_efficiency"] = _budget_winner(
         metrics_a.budget_efficiency, metrics_b.budget_efficiency,
     )
+    summary["synergy_density"] = _compare_metric(
+        metrics_a.synergy_density, metrics_b.synergy_density, "avg_synergy",
+    )
 
-    # Overall: count A vs B wins across the four metrics
+    # Overall: count A vs B wins across the five metrics
     a_wins = sum(1 for k, v in summary.items() if v == "A")
     b_wins = sum(1 for k, v in summary.items() if v == "B")
     if a_wins > b_wins:
@@ -221,6 +238,14 @@ def format_comparison(result: ComparisonResult) -> str:
     be_w = result.summary["budget_efficiency"]
     rows.append(
         f"{'Budget Efficiency':<{col_w}}| {be_a:<{val_w}}| {be_b:<{val_w}}| {be_w}"
+    )
+
+    # Synergy Density
+    sd_a = _fmt_float(ma.synergy_density.avg_synergy if ma.synergy_density else None)
+    sd_b = _fmt_float(mb.synergy_density.avg_synergy if mb.synergy_density else None)
+    sd_w = result.summary["synergy_density"]
+    rows.append(
+        f"{'Synergy Density':<{col_w}}| {sd_a:<{val_w}}| {sd_b:<{val_w}}| {sd_w}"
     )
 
     # Informational rows (no winner)

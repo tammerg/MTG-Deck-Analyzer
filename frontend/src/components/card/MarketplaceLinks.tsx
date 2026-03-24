@@ -32,7 +32,6 @@ export default function MarketplaceLinks({ card }: MarketplaceLinksProps) {
       <button
         type="button"
         onClick={toggle}
-        aria-haspopup="true"
         aria-expanded={open}
         aria-label={`Buy ${card.card_name}`}
         title="Buy this card"

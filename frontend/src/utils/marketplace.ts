@@ -117,10 +117,9 @@ export const MARKETPLACE_META: Record<Marketplace, { label: string }> = {
 };
 
 /** Human-friendly marketplace display names, derived from MARKETPLACE_META. */
-export const MARKETPLACE_LABELS: Record<Marketplace, string> = {
-  tcgplayer: MARKETPLACE_META.tcgplayer.label,
-  cardkingdom: MARKETPLACE_META.cardkingdom.label,
-};
+export const MARKETPLACE_LABELS = Object.fromEntries(
+  Object.entries(MARKETPLACE_META).map(([k, v]) => [k, v.label])
+) as Record<Marketplace, string>;
 
 /**
  * Get all marketplace options for a single card with URLs and prices.

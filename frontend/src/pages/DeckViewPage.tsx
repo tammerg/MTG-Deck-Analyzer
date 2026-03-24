@@ -32,6 +32,27 @@ export default function DeckViewPage() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [lightboxCard, setLightboxCard] = useState<{ name: string; url: string } | null>(null);
 
+  // Group non-commander cards by category, sorted by category order.
+  // Must be declared before any early returns to satisfy Rules of Hooks.
+  const categoryMap = useMemo(() => {
+    const cards = deck?.cards ?? [];
+    const nonCommanderCards = cards.filter((c) => !c.is_commander);
+    return nonCommanderCards.reduce<Record<string, DeckCardResponse[]>>(
+      (acc, card) => {
+        const cat = card.category ?? 'utility';
+        if (!acc[cat]) acc[cat] = [];
+        acc[cat].push(card);
+        return acc;
+      },
+      {}
+    );
+  }, [deck?.cards]);
+
+  const sortedCategories = useMemo(
+    () => Object.keys(categoryMap).sort((a, b) => getCategorySortOrder(a) - getCategorySortOrder(b)),
+    [categoryMap]
+  );
+
   const handleCardClick = useCallback((card: DeckCardResponse) => {
     if (card.image_url) {
       setLightboxCard({ name: card.card_name, url: card.image_url });
@@ -124,25 +145,6 @@ export default function DeckViewPage() {
       </div>
     );
   }
-
-  // Group non-commander cards by category, sorted by category order
-  const categoryMap = useMemo(() => {
-    const nonCommanderCards = deck.cards.filter((c) => !c.is_commander);
-    return nonCommanderCards.reduce<Record<string, DeckCardResponse[]>>(
-      (acc, card) => {
-        const cat = card.category ?? 'utility';
-        if (!acc[cat]) acc[cat] = [];
-        acc[cat].push(card);
-        return acc;
-      },
-      {}
-    );
-  }, [deck.cards]);
-
-  const sortedCategories = useMemo(
-    () => Object.keys(categoryMap).sort((a, b) => getCategorySortOrder(a) - getCategorySortOrder(b)),
-    [categoryMap]
-  );
 
   return (
     <div className="space-y-6">

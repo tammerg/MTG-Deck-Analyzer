@@ -1,8 +1,9 @@
+import { useMemo } from 'react';
 import type { DeckCardResponse } from '../../api/types';
 import {
   getDeckPurchaseUrl,
   getDeckTotalForMarketplace,
-  MARKETPLACE_LABELS,
+  MARKETPLACE_META,
   type Marketplace,
 } from '../../utils/marketplace';
 import { useDropdown } from '../../hooks/useDropdown';
@@ -25,12 +26,22 @@ const MARKETPLACES: Marketplace[] = ['tcgplayer', 'cardkingdom'];
 export default function BuyAllMenu({ cards }: BuyAllMenuProps) {
   const { open, toggle, setOpen, containerRef } = useDropdown();
 
+  const menuItems = useMemo(
+    () =>
+      MARKETPLACES.map((marketplace) => ({
+        marketplace,
+        total: getDeckTotalForMarketplace(marketplace, cards),
+        url: getDeckPurchaseUrl(marketplace, cards),
+        label: MARKETPLACE_META[marketplace].label,
+      })),
+    [cards]
+  );
+
   return (
     <div ref={containerRef} className="relative">
       <button
         type="button"
         onClick={toggle}
-        aria-haspopup="true"
         aria-expanded={open}
         className={[
           'flex items-center gap-2 rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm font-medium',
@@ -61,33 +72,28 @@ export default function BuyAllMenu({ cards }: BuyAllMenuProps) {
             'bg-[var(--color-surface-alt)] shadow-2xl',
           ].join(' ')}
         >
-          {MARKETPLACES.map((marketplace) => {
-            const total = getDeckTotalForMarketplace(marketplace, cards);
-            const url = getDeckPurchaseUrl(marketplace, cards);
-
-            return (
-              <a
-                key={marketplace}
-                href={url}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={() => setOpen(false)}
-                className={[
-                  'flex w-full items-center justify-between px-4 py-3 text-left transition-colors',
-                  'hover:bg-[var(--color-surface-raised)]',
-                  'focus:outline-none focus:bg-[var(--color-surface-raised)]',
-                  'first:rounded-t-lg last:rounded-b-lg',
-                ].join(' ')}
-              >
-                <span className="text-sm font-medium text-[var(--color-text-primary)]">
-                  {MARKETPLACE_LABELS[marketplace]}
-                </span>
-                <span className="text-sm text-[var(--color-text-secondary)]">
-                  {total != null ? `$${total.toFixed(2)}` : 'N/A'}
-                </span>
-              </a>
-            );
-          })}
+          {menuItems.map(({ marketplace, total, url, label }) => (
+            <a
+              key={marketplace}
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => setOpen(false)}
+              className={[
+                'flex w-full items-center justify-between px-4 py-3 text-left transition-colors',
+                'hover:bg-[var(--color-surface-raised)]',
+                'focus:outline-none focus:bg-[var(--color-surface-raised)]',
+                'first:rounded-t-lg last:rounded-b-lg',
+              ].join(' ')}
+            >
+              <span className="text-sm font-medium text-[var(--color-text-primary)]">
+                {label}
+              </span>
+              <span className="text-sm text-[var(--color-text-secondary)]">
+                {total != null ? `$${total.toFixed(2)}` : 'N/A'}
+              </span>
+            </a>
+          ))}
         </div>
       )}
     </div>

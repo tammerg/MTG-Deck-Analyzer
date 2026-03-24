@@ -47,7 +47,7 @@ def _resolve_deck_cards(
     Returns:
         List of Card objects for each DeckCard that resolves to a known card.
     """
-    cards_by_id = card_repo.get_cards_by_ids([dc.card_id for dc in deck.cards])
+    cards_by_id = card_repo.get_cards_by_ids([dc.card_id for dc in deck.cards if dc.card_id])
     return list(cards_by_id.values())
 
 
@@ -75,12 +75,9 @@ def _deck_to_response(
 
     cards_by_id = card_repo.get_cards_by_ids(card_ids)
     printings_by_card_id = printing_repo.get_primary_printings(card_ids)
-    # Only fetch prices for cards whose DeckCard price is unset (0.0)
-    missing_price_ids = [
-        dc.card_id for dc in deck.cards if dc.card_id and dc.price == 0.0
-    ]
-    fetched_prices = price_repo.get_cheapest_prices(missing_price_ids)
     # Single batched query regardless of deck size; cost is O(1) in round-trips.
+    # Cheapest price per card is derived from prices_by_source, avoiding a
+    # redundant get_cheapest_prices call.
     prices_by_source = price_repo.get_prices_by_source(card_ids)
 
     card_responses: list[DeckCardResponse] = []
@@ -104,10 +101,9 @@ def _deck_to_response(
                 tcgplayer_id = primary.tcgplayer_id
 
         price = dc.price
-        if price == 0.0 and dc.card_id:
-            price = fetched_prices.get(dc.card_id, 0.0)
-
         source_prices = prices_by_source.get(dc.card_id, {}) if dc.card_id else {}
+        if price == 0.0 and source_prices:
+            price = min(source_prices.values())
 
         card_responses.append(
             DeckCardResponse(
@@ -208,7 +204,7 @@ def build_deck(
     # Merge price data from in-memory build result into saved deck cards
     price_by_card_id: dict[int, float] = {}
     for dc in built_deck.cards:
-        if dc.card_id is not None and dc.price is not None and dc.price > 0.0:
+        if dc.card_id is not None and dc.price > 0.0:
             price_by_card_id[dc.card_id] = dc.price
 
     for dc in saved_deck.cards:

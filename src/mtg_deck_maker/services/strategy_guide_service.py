@@ -72,7 +72,7 @@ class StrategyGuideService:
         try:
             combos = combo_repo.get_combos_for_cards(card_names)
         except sqlite3.OperationalError:
-            logger.debug("Combos table unavailable; proceeding without combos")
+            logger.warning("Combos table unavailable; proceeding without combos")
             combos = []
 
         # Generate algorithmic guide

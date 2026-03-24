@@ -8,6 +8,9 @@ from typing import NotRequired, TypedDict
 from mtg_deck_maker.db.database import Database
 
 # Maps (source, currency) to a canonical marketplace key.
+# Currently only TCGPlayer USD prices are supported. Scryfall USD prices
+# originate from TCGPlayer and are mapped accordingly. Cardmarket/EUR
+# support is planned but not yet implemented.
 # Defined at module level to avoid reconstruction on every call.
 _MARKETPLACE_MAP: dict[tuple[str, str], str] = {
     ("scryfall", "USD"): "tcgplayer",
@@ -188,10 +191,9 @@ class PriceRepository:
     ) -> dict[int, dict[str, float]]:
         """Get cheapest price per marketplace for multiple cards.
 
-        Scryfall's USD prices originate from TCGPlayer and EUR prices
-        from Cardmarket, so we split by currency to derive per-marketplace
-        pricing.  Any non-scryfall sources (tcgplayer, justtcg, cardmarket)
-        are mapped directly.
+        Currently returns TCGPlayer USD prices only. Sources scryfall,
+        tcgplayer, and justtcg are all mapped to the "tcgplayer" marketplace
+        key. Cardmarket/EUR support is planned but not yet implemented.
 
         Args:
             card_ids: List of card database IDs.
@@ -200,7 +202,7 @@ class PriceRepository:
 
         Returns:
             Dict mapping card_id to marketplace prices, e.g.
-            ``{42: {"tcgplayer": 5.99, "cardmarket": 4.50}}``.
+            ``{42: {"tcgplayer": 5.99}}``.
         """
         if not card_ids:
             return {}

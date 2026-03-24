@@ -3,8 +3,28 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import NotRequired, TypedDict
 
 from mtg_deck_maker.db.database import Database
+
+# Maps (source, currency) to a canonical marketplace key.
+# Defined at module level to avoid reconstruction on every call.
+_MARKETPLACE_MAP: dict[tuple[str, str], str] = {
+    ("scryfall", "USD"): "tcgplayer",
+    ("tcgplayer", "USD"): "tcgplayer",
+    ("justtcg", "USD"): "tcgplayer",
+}
+
+
+class PriceRecord(TypedDict):
+    """Shape of a price record dict accepted by ``bulk_insert_prices``."""
+
+    printing_id: int
+    source: str
+    price: float
+    currency: NotRequired[str]
+    finish: NotRequired[str]
+    retrieved_at: NotRequired[str]
 
 
 class PriceRepository:
@@ -164,6 +184,7 @@ class PriceRepository:
         self,
         card_ids: list[int],
         finish: str = "nonfoil",
+        currency: str = "USD",
     ) -> dict[int, dict[str, float]]:
         """Get cheapest price per marketplace for multiple cards.
 
@@ -172,19 +193,17 @@ class PriceRepository:
         pricing.  Any non-scryfall sources (tcgplayer, justtcg, cardmarket)
         are mapped directly.
 
+        Args:
+            card_ids: List of card database IDs.
+            finish: Card finish to filter by (default nonfoil).
+            currency: Currency code to filter by (default USD).
+
         Returns:
             Dict mapping card_id to marketplace prices, e.g.
             ``{42: {"tcgplayer": 5.99, "cardmarket": 4.50}}``.
         """
         if not card_ids:
             return {}
-
-        # Map (source, currency) → marketplace key (USD only)
-        _MARKETPLACE_MAP: dict[tuple[str, str], str] = {
-            ("scryfall", "USD"): "tcgplayer",
-            ("tcgplayer", "USD"): "tcgplayer",
-            ("justtcg", "USD"): "tcgplayer",
-        }
 
         result: dict[int, dict[str, float]] = {}
         chunk_size = 900
@@ -197,10 +216,10 @@ class PriceRepository:
                 FROM prices p
                 JOIN printings pr ON p.printing_id = pr.id
                 WHERE pr.card_id IN ({placeholders})
-                  AND p.currency = 'USD'
+                  AND p.currency = ?
                   AND p.finish = ? AND p.price IS NOT NULL
                 GROUP BY pr.card_id, p.source, p.currency""",
-                (*chunk, finish),
+                (*chunk, currency, finish),
             )
             for row in cursor.fetchall():
                 if row["min_price"] is None:
@@ -220,7 +239,7 @@ class PriceRepository:
 
     def bulk_insert_prices(
         self,
-        prices: list[dict],
+        prices: list[PriceRecord],
     ) -> int:
         """Insert multiple price records in a single transaction.
 

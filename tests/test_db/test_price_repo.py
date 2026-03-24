@@ -110,42 +110,43 @@ class TestGetLatestPrice:
         )
         assert latest == 5.00
 
-    @pytest.mark.parametrize(
-        "filter_type",
-        ["source", "finish"],
-        ids=["filters_source", "filters_finish"],
-    )
-    def test_get_latest_price_filters(
+    def test_get_latest_price_filters_by_source(
         self,
         all_repos: tuple[CardRepository, PrintingRepository, PriceRepository],
         printing_ids: tuple[int, int],
-        filter_type: str,
     ) -> None:
         _, _, price_repo = all_repos
         pid1, _ = printing_ids
 
-        if filter_type == "source":
-            price_repo.insert_price(
-                printing_id=pid1, source="tcgplayer", price=5.00,
-                retrieved_at="2026-01-15T00:00:00Z",
-            )
-            price_repo.insert_price(
-                printing_id=pid1, source="scryfall", price=4.50,
-                retrieved_at="2026-01-15T00:00:00Z",
-            )
-            assert price_repo.get_latest_price(printing_id=pid1, source="tcgplayer") == 5.00
-            assert price_repo.get_latest_price(printing_id=pid1, source="scryfall") == 4.50
-        else:
-            price_repo.insert_price(
-                printing_id=pid1, source="tcgplayer", price=5.00, finish="nonfoil",
-                retrieved_at="2026-01-15T00:00:00Z",
-            )
-            price_repo.insert_price(
-                printing_id=pid1, source="tcgplayer", price=10.00, finish="foil",
-                retrieved_at="2026-01-15T00:00:00Z",
-            )
-            assert price_repo.get_latest_price(printing_id=pid1, source="tcgplayer", finish="nonfoil") == 5.00
-            assert price_repo.get_latest_price(printing_id=pid1, source="tcgplayer", finish="foil") == 10.00
+        price_repo.insert_price(
+            printing_id=pid1, source="tcgplayer", price=5.00,
+            retrieved_at="2026-01-15T00:00:00Z",
+        )
+        price_repo.insert_price(
+            printing_id=pid1, source="scryfall", price=4.50,
+            retrieved_at="2026-01-15T00:00:00Z",
+        )
+        assert price_repo.get_latest_price(printing_id=pid1, source="tcgplayer") == 5.00
+        assert price_repo.get_latest_price(printing_id=pid1, source="scryfall") == 4.50
+
+    def test_get_latest_price_filters_by_finish(
+        self,
+        all_repos: tuple[CardRepository, PrintingRepository, PriceRepository],
+        printing_ids: tuple[int, int],
+    ) -> None:
+        _, _, price_repo = all_repos
+        pid1, _ = printing_ids
+
+        price_repo.insert_price(
+            printing_id=pid1, source="tcgplayer", price=5.00, finish="nonfoil",
+            retrieved_at="2026-01-15T00:00:00Z",
+        )
+        price_repo.insert_price(
+            printing_id=pid1, source="tcgplayer", price=10.00, finish="foil",
+            retrieved_at="2026-01-15T00:00:00Z",
+        )
+        assert price_repo.get_latest_price(printing_id=pid1, source="tcgplayer", finish="nonfoil") == 5.00
+        assert price_repo.get_latest_price(printing_id=pid1, source="tcgplayer", finish="foil") == 10.00
 
     def test_get_latest_price_not_found(
         self,

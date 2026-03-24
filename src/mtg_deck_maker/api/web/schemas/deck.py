@@ -65,7 +65,7 @@ class DeckSummaryResponse(BaseModel):
     id: int
     name: str
     format: str
-    budget_target: float
+    budget_target: float | None = None
     created_at: str
     total_cards: int
     total_price: float

@@ -80,6 +80,7 @@ def _deck_to_response(
         dc.card_id for dc in deck.cards if dc.card_id and dc.price == 0.0
     ]
     fetched_prices = price_repo.get_cheapest_prices(missing_price_ids)
+    # Single batched query regardless of deck size; cost is O(1) in round-trips.
     prices_by_source = price_repo.get_prices_by_source(card_ids)
 
     card_responses: list[DeckCardResponse] = []
@@ -190,7 +191,7 @@ def build_deck(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Unexpected error during deck build")
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail="An internal error occurred") from exc
 
     built_deck = result.deck
     built_deck.budget_target = req.budget
@@ -492,7 +493,7 @@ def strategy_guide(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Strategy guide generation failed")
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail="An internal error occurred") from exc
 
     return StrategyGuideResponse(
         archetype=guide.archetype,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 
 from mtg_deck_maker.advisor.llm_provider import LLMProvider
 from mtg_deck_maker.db.card_repo import CardRepository
@@ -70,7 +71,7 @@ class StrategyGuideService:
         # Fetch combos (table may not exist if sync hasn't been run)
         try:
             combos = combo_repo.get_combos_for_cards(card_names)
-        except Exception:
+        except sqlite3.OperationalError:
             logger.debug("Combos table unavailable; proceeding without combos")
             combos = []
 
@@ -89,8 +90,8 @@ class StrategyGuideService:
             try:
                 narrative = self._generate_narrative(guide, llm_provider)
                 guide.llm_narrative = narrative
-            except Exception:
-                logger.exception("LLM narrative generation failed; continuing without it")
+            except Exception as exc:
+                logger.warning("LLM narrative generation failed: %s", exc)
 
         return guide
 

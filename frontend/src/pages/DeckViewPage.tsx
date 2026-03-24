@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router';
 import { useDeck, useDeleteDeck } from '../hooks/useDeck';
 import CommanderBanner from '../components/deck/CommanderBanner';
@@ -32,11 +32,11 @@ export default function DeckViewPage() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [lightboxCard, setLightboxCard] = useState<{ name: string; url: string } | null>(null);
 
-  const handleCardClick = (card: DeckCardResponse) => {
+  const handleCardClick = useCallback((card: DeckCardResponse) => {
     if (card.image_url) {
       setLightboxCard({ name: card.card_name, url: card.image_url });
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (deck) {
@@ -46,7 +46,7 @@ export default function DeckViewPage() {
     }
   }, [deck]);
 
-  const handleDeleteClick = () => {
+  const handleDeleteClick = useCallback(() => {
     if (!confirmDelete) {
       setConfirmDelete(true);
       return;
@@ -55,7 +55,7 @@ export default function DeckViewPage() {
     deleteDeck(id, {
       onSuccess: () => navigate('/'),
     });
-  };
+  }, [confirmDelete, id, deleteDeck, navigate]);
 
   // Loading skeleton
   if (isLoading) {
@@ -63,13 +63,11 @@ export default function DeckViewPage() {
       <div className="animate-pulse space-y-6" aria-busy="true" aria-label="Loading deck">
         {/* Banner skeleton */}
         <div className="flex justify-center gap-6 py-8">
-          {Array.from({ length: 1 }).map((_, i) => (
-            <div key={i} className="flex flex-col items-center gap-3">
-              <div className="h-72 w-48 rounded-lg bg-[var(--color-surface-raised)]" />
-              <div className="h-5 w-36 rounded bg-[var(--color-surface-raised)]" />
-              <div className="h-3 w-28 rounded bg-[var(--color-surface-raised)]" />
-            </div>
-          ))}
+          <div className="flex flex-col items-center gap-3">
+            <div className="h-72 w-48 rounded-lg bg-[var(--color-surface-raised)]" />
+            <div className="h-5 w-36 rounded bg-[var(--color-surface-raised)]" />
+            <div className="h-3 w-28 rounded bg-[var(--color-surface-raised)]" />
+          </div>
         </div>
         {/* Stats skeleton */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -128,20 +126,22 @@ export default function DeckViewPage() {
   }
 
   // Group non-commander cards by category, sorted by category order
-  const nonCommanderCards = deck.cards.filter((c) => !c.is_commander);
+  const categoryMap = useMemo(() => {
+    const nonCommanderCards = deck.cards.filter((c) => !c.is_commander);
+    return nonCommanderCards.reduce<Record<string, DeckCardResponse[]>>(
+      (acc, card) => {
+        const cat = card.category ?? 'utility';
+        if (!acc[cat]) acc[cat] = [];
+        acc[cat].push(card);
+        return acc;
+      },
+      {}
+    );
+  }, [deck.cards]);
 
-  const categoryMap = nonCommanderCards.reduce<Record<string, DeckCardResponse[]>>(
-    (acc, card) => {
-      const cat = card.category ?? 'utility';
-      if (!acc[cat]) acc[cat] = [];
-      acc[cat].push(card);
-      return acc;
-    },
-    {}
-  );
-
-  const sortedCategories = Object.keys(categoryMap).sort(
-    (a, b) => getCategorySortOrder(a) - getCategorySortOrder(b)
+  const sortedCategories = useMemo(
+    () => Object.keys(categoryMap).sort((a, b) => getCategorySortOrder(a) - getCategorySortOrder(b)),
+    [categoryMap]
   );
 
   return (
@@ -164,7 +164,7 @@ export default function DeckViewPage() {
         {/* Actions */}
         <div className="flex items-center gap-2">
           {id != null && <ExportMenu deckId={id} />}
-          <BuyAllMenu cards={deck?.cards ?? []} />
+          <BuyAllMenu cards={deck.cards} />
 
           {/* Delete button */}
           <button

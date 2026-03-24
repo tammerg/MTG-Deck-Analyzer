@@ -81,6 +81,13 @@ export function getDeckTotalForMarketplace(
 /**
  * Recommend the cheapest marketplace for a deck.
  * Returns null if no marketplace has pricing data.
+ *
+ * @remarks
+ * Currently always returns `'tcgplayer'` when pricing data is available because
+ * {@link getMarketplacePrice} returns the same TCGPlayer-sourced USD price for
+ * every marketplace. The "Best Price" recommendation is therefore meaningless
+ * until distinct per-marketplace pricing is available. Do not surface this
+ * result in the UI until that data is provided.
  */
 export function recommendMarketplace(
   cards: DeckCardResponse[],
@@ -101,26 +108,33 @@ export function recommendMarketplace(
 }
 
 /**
+ * Single source of truth for marketplace metadata.
+ * Add fields here (e.g. logoUrl, affiliateTag) as needed.
+ */
+export const MARKETPLACE_META: Record<Marketplace, { label: string }> = {
+  tcgplayer: { label: 'TCGPlayer' },
+  cardkingdom: { label: 'Card Kingdom' },
+};
+
+/** Human-friendly marketplace display names, derived from MARKETPLACE_META. */
+export const MARKETPLACE_LABELS: Record<Marketplace, string> = {
+  tcgplayer: MARKETPLACE_META.tcgplayer.label,
+  cardkingdom: MARKETPLACE_META.cardkingdom.label,
+};
+
+/**
  * Get all marketplace options for a single card with URLs and prices.
+ * Labels are derived from MARKETPLACE_META.
  */
 export function getCardMarketplaceOptions(
   card: DeckCardResponse,
 ): MarketplaceOption[] {
-  const marketplaces: { marketplace: Marketplace; label: string }[] = [
-    { marketplace: 'tcgplayer', label: 'TCGPlayer' },
-    { marketplace: 'cardkingdom', label: 'Card Kingdom' },
-  ];
+  const marketplaces: Marketplace[] = ['tcgplayer', 'cardkingdom'];
 
-  return marketplaces.map(({ marketplace, label }) => ({
+  return marketplaces.map((marketplace) => ({
     marketplace,
-    label,
+    label: MARKETPLACE_META[marketplace].label,
     price: getMarketplacePrice(marketplace, card),
     url: getCardPurchaseUrl(marketplace, card),
   }));
 }
-
-/** Human-friendly marketplace display names. */
-export const MARKETPLACE_LABELS: Record<Marketplace, string> = {
-  tcgplayer: 'TCGPlayer',
-  cardkingdom: 'Card Kingdom',
-};

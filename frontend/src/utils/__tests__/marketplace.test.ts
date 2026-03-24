@@ -7,6 +7,8 @@ import {
   getDeckTotalForMarketplace,
   recommendMarketplace,
   getCardMarketplaceOptions,
+  MARKETPLACE_META,
+  MARKETPLACE_LABELS,
 } from '../marketplace';
 
 function makeCard(overrides: Partial<DeckCardResponse> = {}): DeckCardResponse {
@@ -116,5 +118,26 @@ describe('getCardMarketplaceOptions', () => {
     const tcg = options.find((o) => o.marketplace === 'tcgplayer')!;
     expect(tcg.price).toBe(2.99);
     expect(tcg.url).toContain('tcgplayer.com');
+  });
+
+  it('derives labels from MARKETPLACE_META', () => {
+    const options = getCardMarketplaceOptions(makeCard());
+    for (const opt of options) {
+      expect(opt.label).toBe(MARKETPLACE_META[opt.marketplace].label);
+    }
+  });
+});
+
+describe('MARKETPLACE_META', () => {
+  it('contains entries for both marketplaces', () => {
+    expect(MARKETPLACE_META.tcgplayer.label).toBe('TCGPlayer');
+    expect(MARKETPLACE_META.cardkingdom.label).toBe('Card Kingdom');
+  });
+});
+
+describe('MARKETPLACE_LABELS', () => {
+  it('derives from MARKETPLACE_META', () => {
+    expect(MARKETPLACE_LABELS.tcgplayer).toBe(MARKETPLACE_META.tcgplayer.label);
+    expect(MARKETPLACE_LABELS.cardkingdom).toBe(MARKETPLACE_META.cardkingdom.label);
   });
 });

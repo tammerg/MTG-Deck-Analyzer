@@ -36,11 +36,7 @@ export default function CardListItem(props: CardListItemProps) {
     props.variant === 'deck-card' ? props.budget : undefined;
 
   const handleClick = () => {
-    if (props.variant === 'card') {
-      props.onClick?.(props.card);
-    } else {
-      props.onClick?.(props.card);
-    }
+    props.onClick?.(props.card);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

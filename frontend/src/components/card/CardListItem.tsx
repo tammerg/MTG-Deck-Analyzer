@@ -1,6 +1,7 @@
 import type { CardResponse, DeckCardResponse } from '../../api/types';
 import ManaCost from './ManaCost';
 import PriceTag from './PriceTag';
+import MarketplaceLinks from './MarketplaceLinks';
 import { getCategoryDisplayName, getCategoryColor } from '../../utils/categories';
 import { truncate } from '../../utils/format';
 
@@ -107,6 +108,11 @@ export default function CardListItem(props: CardListItemProps) {
 
       {/* Price */}
       <PriceTag price={price} budget={budget} />
+
+      {/* Marketplace buy button (deck view only) */}
+      {props.variant === 'deck-card' && (
+        <MarketplaceLinks card={props.card} />
+      )}
     </div>
   );
 }

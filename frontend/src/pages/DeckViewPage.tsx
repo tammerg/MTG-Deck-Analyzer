@@ -7,8 +7,10 @@ import ManaCurveChart from '../components/deck/ManaCurveChart';
 import ColorDistribution from '../components/deck/ColorDistribution';
 import DeckCategoryGroup from '../components/deck/DeckCategoryGroup';
 import ExportMenu from '../components/deck/ExportMenu';
+import BuyAllMenu from '../components/deck/BuyAllMenu';
 import AdvisePanel from '../components/deck/AdvisePanel';
 import StrategyGuidePanel from '../components/deck/StrategyGuide';
+import CardLightbox from '../components/card/CardLightbox';
 import { getCategorySortOrder } from '../utils/categories';
 import type { DeckCardResponse } from '../api/types';
 
@@ -28,6 +30,13 @@ export default function DeckViewPage() {
   const { deleteDeck, isDeleting } = useDeleteDeck();
 
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [lightboxCard, setLightboxCard] = useState<{ name: string; url: string } | null>(null);
+
+  const handleCardClick = (card: DeckCardResponse) => {
+    if (card.image_url) {
+      setLightboxCard({ name: card.card_name, url: card.image_url });
+    }
+  };
 
   useEffect(() => {
     if (deck) {
@@ -155,6 +164,7 @@ export default function DeckViewPage() {
         {/* Actions */}
         <div className="flex items-center gap-2">
           {id != null && <ExportMenu deckId={id} />}
+          <BuyAllMenu cards={deck?.cards ?? []} />
 
           {/* Delete button */}
           <button
@@ -219,6 +229,7 @@ export default function DeckViewPage() {
               cards={categoryMap[category]}
               budget={deck.budget_target ?? undefined}
               defaultExpanded={true}
+              onCardClick={handleCardClick}
             />
           ))}
         </div>
@@ -234,12 +245,21 @@ export default function DeckViewPage() {
 
       {/* Strategy Guide */}
       {id != null && (
-        <StrategyGuidePanel deckId={id} />
+        <StrategyGuidePanel deckId={id} cards={deck.cards} />
       )}
 
       {/* AI Advisor */}
       {id != null && (
         <AdvisePanel deckId={id} />
+      )}
+
+      {/* Card image lightbox */}
+      {lightboxCard && (
+        <CardLightbox
+          imageUrl={lightboxCard.url}
+          cardName={lightboxCard.name}
+          onClose={() => setLightboxCard(null)}
+        />
       )}
 
       {/* Footer link */}

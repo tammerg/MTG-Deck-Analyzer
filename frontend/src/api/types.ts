@@ -46,6 +46,8 @@ export interface DeckCardResponse {
   type_line: string;
   oracle_text: string;
   image_url: string | null;
+  tcgplayer_id: number | null;
+  price_tcgplayer: number | null;
 }
 
 export interface DeckResponse {

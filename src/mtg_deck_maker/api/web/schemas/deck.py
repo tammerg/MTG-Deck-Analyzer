@@ -35,6 +35,8 @@ class DeckCardResponse(BaseModel):
     type_line: str
     oracle_text: str
     image_url: str | None = None
+    tcgplayer_id: int | None = None
+    price_tcgplayer: float | None = None
 
 
 class DeckResponse(BaseModel):

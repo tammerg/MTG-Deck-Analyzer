@@ -26,7 +26,7 @@ from mtg_deck_maker.db.deck_repo import DeckRepository
 from mtg_deck_maker.db.price_repo import PriceRepository
 from mtg_deck_maker.db.printing_repo import PrintingRepository
 from mtg_deck_maker.models.card import Card
-from mtg_deck_maker.models.deck import Deck, DeckCard
+from mtg_deck_maker.models.deck import Deck
 from mtg_deck_maker.services.build_service import BuildService, BuildServiceError
 
 logger = logging.getLogger(__name__)
@@ -80,6 +80,7 @@ def _deck_to_response(
         dc.card_id for dc in deck.cards if dc.card_id and dc.price == 0.0
     ]
     fetched_prices = price_repo.get_cheapest_prices(missing_price_ids)
+    prices_by_source = price_repo.get_prices_by_source(card_ids)
 
     card_responses: list[DeckCardResponse] = []
     for dc in deck.cards:
@@ -87,6 +88,7 @@ def _deck_to_response(
         mana_cost = ""
         type_line = ""
         oracle_text = ""
+        tcgplayer_id: int | None = None
 
         if dc.card_id:
             card = cards_by_id.get(dc.card_id)
@@ -98,10 +100,13 @@ def _deck_to_response(
             primary = printings_by_card_id.get(dc.card_id)
             if primary is not None:
                 image_url = _scryfall_image_url(primary.scryfall_id)
+                tcgplayer_id = primary.tcgplayer_id
 
         price = dc.price
         if price == 0.0 and dc.card_id:
             price = fetched_prices.get(dc.card_id, 0.0)
+
+        source_prices = prices_by_source.get(dc.card_id, {}) if dc.card_id else {}
 
         card_responses.append(
             DeckCardResponse(
@@ -117,6 +122,8 @@ def _deck_to_response(
                 type_line=type_line,
                 oracle_text=oracle_text,
                 image_url=image_url,
+                tcgplayer_id=tcgplayer_id,
+                price_tcgplayer=source_prices.get("tcgplayer"),
             )
         )
 
@@ -130,7 +137,7 @@ def _deck_to_response(
         created_at=deck.created_at,
         cards=card_responses,
         total_cards=deck.total_cards(),
-        total_price=round(deck.total_price(), 2),
+        total_price=round(sum(cr.price * cr.quantity for cr in card_responses), 2),
         average_cmc=round(deck.average_cmc(), 2),
         color_distribution=deck.color_distribution(),
         commanders=commanders,

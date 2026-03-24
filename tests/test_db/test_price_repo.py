@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone, timedelta
-
 import pytest
 
 from mtg_deck_maker.db.card_repo import CardRepository
@@ -243,6 +241,50 @@ class TestGetCheapestPrices:
         assert card is not None
         prices = price_repo.get_cheapest_prices([card.id])
         assert prices == {}
+
+
+class TestGetPricesBySource:
+    """Test per-source price loading for multiple cards."""
+
+    def test_prices_by_source(
+        self,
+        all_repos: tuple[CardRepository, PrintingRepository, PriceRepository],
+        printing_ids: tuple[int, int],
+    ) -> None:
+        card_repo, _, price_repo = all_repos
+        pid1, pid2 = printing_ids
+
+        price_repo.insert_price(printing_id=pid1, source="tcgplayer", price=5.00)
+        price_repo.insert_price(printing_id=pid2, source="tcgplayer", price=3.00)
+        price_repo.insert_price(printing_id=pid1, source="scryfall", price=4.50)
+
+        card = card_repo.get_card_by_name("Price Test Card")
+        assert card is not None
+
+        result = price_repo.get_prices_by_source([card.id])
+        assert card.id in result
+        sources = result[card.id]
+        # tcgplayer: min(5.00, 3.00, 4.50) = 3.00
+        # (scryfall USD maps to tcgplayer marketplace)
+        assert sources["tcgplayer"] == 3.00
+
+    def test_prices_by_source_empty(
+        self,
+        all_repos: tuple[CardRepository, PrintingRepository, PriceRepository],
+    ) -> None:
+        _, _, price_repo = all_repos
+        assert price_repo.get_prices_by_source([]) == {}
+
+    def test_prices_by_source_no_prices(
+        self,
+        all_repos: tuple[CardRepository, PrintingRepository, PriceRepository],
+        printing_ids: tuple[int, int],
+    ) -> None:
+        card_repo, _, price_repo = all_repos
+        card = card_repo.get_card_by_name("Price Test Card")
+        assert card is not None
+        result = price_repo.get_prices_by_source([card.id])
+        assert result == {}
 
 
 class TestBulkInsertPrices:

@@ -160,6 +160,64 @@ class PriceRepository:
                     result[row["card_id"]] = float(row["min_price"])
         return result
 
+    def get_prices_by_source(
+        self,
+        card_ids: list[int],
+        finish: str = "nonfoil",
+    ) -> dict[int, dict[str, float]]:
+        """Get cheapest price per marketplace for multiple cards.
+
+        Scryfall's USD prices originate from TCGPlayer and EUR prices
+        from Cardmarket, so we split by currency to derive per-marketplace
+        pricing.  Any non-scryfall sources (tcgplayer, justtcg, cardmarket)
+        are mapped directly.
+
+        Returns:
+            Dict mapping card_id to marketplace prices, e.g.
+            ``{42: {"tcgplayer": 5.99, "cardmarket": 4.50}}``.
+        """
+        if not card_ids:
+            return {}
+
+        # Map (source, currency) → marketplace key (USD only)
+        _MARKETPLACE_MAP: dict[tuple[str, str], str] = {
+            ("scryfall", "USD"): "tcgplayer",
+            ("tcgplayer", "USD"): "tcgplayer",
+            ("justtcg", "USD"): "tcgplayer",
+        }
+
+        result: dict[int, dict[str, float]] = {}
+        chunk_size = 900
+        for i in range(0, len(card_ids), chunk_size):
+            chunk = card_ids[i : i + chunk_size]
+            placeholders = ",".join("?" for _ in chunk)
+            cursor = self._db.execute(
+                f"""SELECT pr.card_id, p.source, p.currency,
+                       MIN(p.price) as min_price
+                FROM prices p
+                JOIN printings pr ON p.printing_id = pr.id
+                WHERE pr.card_id IN ({placeholders})
+                  AND p.currency = 'USD'
+                  AND p.finish = ? AND p.price IS NOT NULL
+                GROUP BY pr.card_id, p.source, p.currency""",
+                (*chunk, finish),
+            )
+            for row in cursor.fetchall():
+                if row["min_price"] is None:
+                    continue
+                card_id = row["card_id"]
+                key = (row["source"], row["currency"])
+                marketplace = _MARKETPLACE_MAP.get(key)
+                if marketplace is None:
+                    continue
+                price = float(row["min_price"])
+                if card_id not in result:
+                    result[card_id] = {}
+                # Keep the cheapest if multiple sources map to the same marketplace
+                if marketplace not in result[card_id] or price < result[card_id][marketplace]:
+                    result[card_id][marketplace] = price
+        return result
+
     def bulk_insert_prices(
         self,
         prices: list[dict],

@@ -21,6 +21,24 @@ USER_AGENT = "mtg-deck-maker/0.1.0"
 REQUEST_TIMEOUT = 15.0  # seconds
 
 
+def _extract_cardlists(data: dict) -> list[dict]:
+    """Extract cardlists from EDHREC JSON, handling both old and new formats.
+
+    EDHREC restructured their API: cardlists moved from the top level
+    to ``container.json_dict.cardlists``.  This helper checks both
+    locations so existing and new responses both work.
+    """
+    # New format: container → json_dict → cardlists
+    cardlists = (
+        data.get("container", {}).get("json_dict", {}).get("cardlists", [])
+    )
+    if cardlists:
+        return cardlists
+
+    # Legacy format: top-level cardlists
+    return data.get("cardlists", [])
+
+
 def _commander_name_to_slug(name: str) -> str:
     """Convert a commander name to an EDHREC URL slug.
 
@@ -135,6 +153,76 @@ async def fetch_training_commanders(
     return _parse_training_commanders(data, min_decks)
 
 
+async def fetch_popular_commanders(
+    limit: int = 20,
+) -> list[tuple[str, int]]:
+    """Fetch popular commanders sorted by deck count.
+
+    Queries the same EDHREC endpoint as fetch_training_commanders but
+    returns (name, deck_count) tuples for display purposes.
+
+    Args:
+        limit: Maximum number of commanders to return.
+
+    Returns:
+        List of (name, deck_count) tuples sorted by popularity.
+        Returns empty list on failure.
+    """
+    url = "https://json.edhrec.com/pages/commanders/year.json"
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(REQUEST_TIMEOUT),
+            headers={"User-Agent": USER_AGENT},
+            follow_redirects=True,
+        ) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            data = response.json()
+    except Exception:
+        logger.warning("Failed to fetch popular commanders from %s", url)
+        return []
+
+    return _parse_popular_commanders(data, limit)
+
+
+def _parse_popular_commanders(
+    data: dict, limit: int,
+) -> list[tuple[str, int]]:
+    """Parse the EDHREC commanders list into (name, deck_count) tuples.
+
+    Args:
+        data: Parsed JSON dict from EDHREC.
+        limit: Maximum results to return.
+
+    Returns:
+        List of (name, deck_count) sorted descending by deck count.
+    """
+    try:
+        cardlists = _extract_cardlists(data)
+        if not cardlists:
+            return []
+
+        commanders: list[tuple[str, int]] = []
+
+        for cardlist in cardlists:
+            cardviews = cardlist.get("cardviews", [])
+            if not isinstance(cardviews, list):
+                continue
+
+            for entry in cardviews:
+                name = entry.get("name", "")
+                num_decks = int(entry.get("num_decks", 0))
+                if name and num_decks > 0:
+                    commanders.append((name, num_decks))
+
+        commanders.sort(key=lambda x: x[1], reverse=True)
+        return commanders[:limit]
+    except Exception:
+        logger.warning("Failed to parse popular commanders response")
+        return []
+
+
 def _parse_training_commanders(data: dict, min_decks: int) -> list[str]:
     """Parse the EDHREC commanders list response.
 
@@ -146,7 +234,7 @@ def _parse_training_commanders(data: dict, min_decks: int) -> list[str]:
         List of commander names meeting the threshold.
     """
     try:
-        cardlists = data.get("cardlists", [])
+        cardlists = _extract_cardlists(data)
         if not cardlists:
             return []
 
@@ -183,7 +271,7 @@ def _parse_response(
         List of EdhrecCommanderData. Empty on parse errors.
     """
     try:
-        cardlists = data.get("cardlists", [])
+        cardlists = _extract_cardlists(data)
         if not cardlists:
             return []
 

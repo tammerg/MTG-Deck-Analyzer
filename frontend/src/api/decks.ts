@@ -1,5 +1,5 @@
 import api from './client';
-import type { DeckBuildRequest, DeckResponse, DeckListItem, DeckExportFormat, DeckExportResponse, AdviseRequest, DeckAdviseResponse, StrategyGuideRequest, StrategyGuideResponse } from './types';
+import type { DeckBuildRequest, DeckResponse, DeckListItem, DeckExportFormat, DeckExportResponse, AdviseRequest, DeckAdviseResponse, StrategyGuideRequest, StrategyGuideResponse, DeckUpgradeRequest, DeckUpgradeResponse } from './types';
 
 /**
  * Build a new deck from a commander name and budget.
@@ -68,5 +68,16 @@ export async function adviseDeck(id: number, question: string, provider?: string
 export async function getStrategyGuide(id: number, request?: StrategyGuideRequest): Promise<StrategyGuideResponse> {
   const body: StrategyGuideRequest = { provider: 'auto', num_simulations: 1000, seed: 42, ...request };
   const { data } = await api.post<StrategyGuideResponse>(`/decks/${id}/strategy-guide`, body);
+  return data;
+}
+
+/**
+ * Get upgrade recommendations for a deck.
+ *
+ * Usage:
+ *   const result = await upgradeDeck(42, { budget: 50.0, focus: 'card_draw' });
+ */
+export async function upgradeDeck(id: number, request: DeckUpgradeRequest): Promise<DeckUpgradeResponse> {
+  const { data } = await api.post<DeckUpgradeResponse>(`/decks/${id}/upgrade`, request);
   return data;
 }

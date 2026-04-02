@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import atexit
 import concurrent.futures
+from collections.abc import Coroutine
 from typing import TypeVar
 
 _T = TypeVar("_T")
@@ -22,7 +23,7 @@ _THREAD_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 atexit.register(_THREAD_POOL.shutdown, wait=False)
 
 
-def run_async(coro: "asyncio.Coroutine[object, object, _T]") -> _T:
+def run_async(coro: Coroutine[object, object, _T]) -> _T:
     """Run a coroutine from synchronous code, handling both contexts.
 
     When called from a script or CLI (no running event loop), delegates to

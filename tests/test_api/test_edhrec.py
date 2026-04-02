@@ -9,6 +9,7 @@ import pytest
 from mtg_deck_maker.api.edhrec import (
     _commander_name_to_slug,
     fetch_commander_data,
+    fetch_popular_commanders,
 )
 
 class TestCommanderNameToSlug:
@@ -132,5 +133,89 @@ class TestFetchCommanderData:
             return_value=mock_client,
         ):
             result = await fetch_commander_data("Some Commander")
+
+        assert result == []
+
+
+class TestFetchPopularCommanders:
+    """Tests for fetching popular commanders by deck count."""
+
+    @pytest.mark.asyncio
+    async def test_returns_sorted_by_deck_count(self) -> None:
+        mock_data = {
+            "cardlists": [
+                {
+                    "cardviews": [
+                        {"name": "Atraxa, Praetors' Voice", "num_decks": 5000},
+                        {"name": "Korvold, Fae-Cursed King", "num_decks": 8000},
+                        {"name": "Krenko, Mob Boss", "num_decks": 3000},
+                    ],
+                },
+            ],
+        }
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = mock_data
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch(
+            "mtg_deck_maker.api.edhrec.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            result = await fetch_popular_commanders(limit=3)
+
+        assert len(result) == 3
+        assert result[0] == ("Korvold, Fae-Cursed King", 8000)
+        assert result[1] == ("Atraxa, Praetors' Voice", 5000)
+        assert result[2] == ("Krenko, Mob Boss", 3000)
+
+    @pytest.mark.asyncio
+    async def test_respects_limit(self) -> None:
+        mock_data = {
+            "cardlists": [
+                {
+                    "cardviews": [
+                        {"name": "Commander A", "num_decks": 9000},
+                        {"name": "Commander B", "num_decks": 7000},
+                        {"name": "Commander C", "num_decks": 5000},
+                    ],
+                },
+            ],
+        }
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = mock_data
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch(
+            "mtg_deck_maker.api.edhrec.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            result = await fetch_popular_commanders(limit=2)
+
+        assert len(result) == 2
+
+    @pytest.mark.asyncio
+    async def test_http_error_returns_empty(self) -> None:
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(side_effect=Exception("HTTP 500"))
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch(
+            "mtg_deck_maker.api.edhrec.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            result = await fetch_popular_commanders()
 
         assert result == []

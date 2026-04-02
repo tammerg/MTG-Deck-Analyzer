@@ -7,7 +7,7 @@ interface ResearchResultDisplayProps {
 }
 
 /**
- * Displays a structured ResearchResponse from the LLM advisor.
+ * Displays a structured ResearchResponse from the LLM advisor or data engine.
  * Handles parse_success=false gracefully by showing raw response.
  * Each section is independently collapsible.
  *
@@ -19,9 +19,22 @@ export default function ResearchResultDisplay({ result }: ResearchResultDisplayP
     <div className="space-y-4" aria-label={`Research results for ${result.commander_name}`}>
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold text-[var(--color-text-primary)]">
-          {result.commander_name}
-        </h2>
+        <div className="flex items-center gap-2">
+          <h2 className="text-xl font-bold text-[var(--color-text-primary)]">
+            {result.commander_name}
+          </h2>
+          <span
+            className={[
+              'rounded-full px-2.5 py-0.5 text-xs font-medium',
+              result.source === 'data'
+                ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-800'
+                : 'bg-violet-950/60 text-violet-400 border border-violet-800',
+            ].join(' ')}
+            role="status"
+          >
+            {result.source === 'data' ? 'Powered by EDHREC data' : 'Powered by AI'}
+          </span>
+        </div>
         {!result.parse_success && (
           <span
             className="rounded border border-[var(--color-budget-warn)] px-2 py-0.5 text-xs text-[var(--color-budget-warn)]"

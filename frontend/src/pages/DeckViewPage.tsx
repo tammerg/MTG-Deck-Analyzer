@@ -9,6 +9,7 @@ import DeckCategoryGroup from '../components/deck/DeckCategoryGroup';
 import ExportMenu from '../components/deck/ExportMenu';
 import BuyAllMenu from '../components/deck/BuyAllMenu';
 import AdvisePanel from '../components/deck/AdvisePanel';
+import UpgradePanel from '../components/deck/UpgradePanel';
 import StrategyGuidePanel from '../components/deck/StrategyGuide';
 import CardLightbox from '../components/card/CardLightbox';
 import { getCategorySortOrder } from '../utils/categories';
@@ -248,6 +249,11 @@ export default function DeckViewPage() {
       {/* Strategy Guide */}
       {id != null && (
         <StrategyGuidePanel deckId={id} cards={deck.cards} />
+      )}
+
+      {/* Upgrade Recommendations */}
+      {id != null && (
+        <UpgradePanel deckId={id} />
       )}
 
       {/* AI Advisor */}

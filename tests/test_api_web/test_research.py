@@ -1,4 +1,4 @@
-"""Tests for the research endpoint with mocked LLM provider."""
+"""Tests for the research endpoint (LLM and data-driven paths)."""
 
 from __future__ import annotations
 
@@ -47,20 +47,75 @@ class TestResearch:
         assert data["strategy_overview"] == "Proliferate everything."
         assert "Doubling Season" in data["key_cards"]
         assert data["parse_success"] is True
+        assert data["source"] == "llm"
         # Verify budget was passed
         call_kwargs = RouterMockService.return_value.research_commander.call_args
         assert call_kwargs.kwargs.get("budget") == 75.0
 
-    def test_research_no_provider_returns_503(self, client: TestClient) -> None:
-        """Research endpoint returns 503 when no LLM provider is available."""
-        with patch(
-            "mtg_deck_maker.api.web.routers.research.get_provider"
-        ) as mock_get_provider:
+    def test_research_no_provider_falls_back_to_data(self, client: TestClient) -> None:
+        """Research endpoint falls back to data-driven when no LLM provider is available."""
+        mock_result = MagicMock()
+        mock_result.commander_name = "Atraxa, Praetors' Voice"
+        mock_result.strategy_overview = "Data-driven overview."
+        mock_result.key_cards = ["Sol Ring"]
+        mock_result.budget_staples = ["Sol Ring"]
+        mock_result.combos = []
+        mock_result.win_conditions = []
+        mock_result.cards_to_avoid = []
+        mock_result.parse_success = True
+
+        with (
+            patch(
+                "mtg_deck_maker.api.web.routers.research.get_provider"
+            ) as mock_get_provider,
+            patch(
+                "mtg_deck_maker.api.web.routers.research.data_research_commander",
+            ) as mock_data_research,
+        ):
             mock_get_provider.return_value = None
+            mock_data_research.return_value = mock_result
 
             resp = client.post(
                 "/api/research",
                 json={"commander": "Atraxa, Praetors' Voice"},
             )
 
-        assert resp.status_code == 503
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["source"] == "data"
+        assert data["commander_name"] == "Atraxa, Praetors' Voice"
+        assert data["parse_success"] is True
+        # Verify data_research_commander was called with correct arguments
+        mock_data_research.assert_called_once()
+        call_args = mock_data_research.call_args
+        assert call_args.args[1] == "Atraxa, Praetors' Voice"  # commander_name
+        assert call_args.kwargs.get("budget") is None  # No budget provided
+
+    def test_research_explicit_data_provider(self, client: TestClient) -> None:
+        """Research endpoint uses data-driven when provider='data' is explicitly set."""
+        mock_result = MagicMock()
+        mock_result.commander_name = "Atraxa, Praetors' Voice"
+        mock_result.strategy_overview = "Data overview."
+        mock_result.key_cards = []
+        mock_result.budget_staples = []
+        mock_result.combos = []
+        mock_result.win_conditions = []
+        mock_result.cards_to_avoid = []
+        mock_result.parse_success = True
+
+        with patch(
+            "mtg_deck_maker.api.web.routers.research.data_research_commander",
+        ) as mock_data_research:
+            mock_data_research.return_value = mock_result
+
+            resp = client.post(
+                "/api/research",
+                json={
+                    "commander": "Atraxa, Praetors' Voice",
+                    "provider": "data",
+                },
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["source"] == "data"

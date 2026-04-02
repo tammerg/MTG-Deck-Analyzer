@@ -1,5 +1,5 @@
 import api from './client';
-import type { CardResponse, CardSearchParams, CardSearchResponse, PrintingResponse } from './types';
+import type { CardResponse, CardSearchParams, CardSearchResponse, PopularCommandersListResponse, PrintingResponse } from './types';
 
 /**
  * Search cards by query string with optional filters.
@@ -45,6 +45,16 @@ export async function getCardPrice(id: number): Promise<{ card_id: number; card_
 export async function searchCommanders(query: string, limit = 20): Promise<CardResponse[]> {
   const { data } = await api.get<CardResponse[]>('/commanders/search', {
     params: { q: query, limit },
+  });
+  return data;
+}
+
+/**
+ * Fetch popular commanders from EDHREC, sorted by deck count.
+ */
+export async function getPopularCommanders(limit = 20): Promise<PopularCommandersListResponse> {
+  const { data } = await api.get<PopularCommandersListResponse>('/commanders/popular', {
+    params: { limit },
   });
   return data;
 }

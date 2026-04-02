@@ -16,8 +16,11 @@ from mtg_deck_maker.api.web.schemas.deck import (
     DeckExportRequest,
     DeckResponse,
     DeckSummaryResponse,
+    DeckUpgradeRequest,
+    DeckUpgradeResponse,
     StrategyGuideRequest,
     StrategyGuideResponse,
+    UpgradeRecommendationResponse,
 )
 from mtg_deck_maker.config import AppConfig
 from mtg_deck_maker.db.card_repo import CardRepository
@@ -522,4 +525,90 @@ def strategy_guide(
             for ks in guide.key_synergies
         ],
         llm_narrative=guide.llm_narrative,
+    )
+
+
+@router.post("/decks/{deck_id}/upgrade", response_model=DeckUpgradeResponse)
+def upgrade_deck(
+    deck_id: int,
+    req: DeckUpgradeRequest,
+    db: Database = Depends(get_db),
+) -> DeckUpgradeResponse:
+    """Get upgrade recommendations for a deck.
+
+    Args:
+        deck_id: The deck's database primary key.
+        req: Upgrade request with budget and optional focus.
+
+    Returns:
+        DeckUpgradeResponse with recommended card swaps.
+
+    Raises:
+        HTTPException: 404 if the deck is not found.
+    """
+    from mtg_deck_maker.services.upgrade_service import UpgradeService
+
+    deck_repo = DeckRepository(db)
+    card_repo = CardRepository(db)
+    price_repo = PriceRepository(db)
+
+    deck = deck_repo.get_deck(deck_id)
+    if deck is None:
+        raise HTTPException(status_code=404, detail=f"Deck {deck_id} not found.")
+
+    deck_cards = _resolve_deck_cards(deck, card_repo)
+
+    # Identify commander
+    commander: Card | None = None
+    for card in deck_cards:
+        for dc in deck.cards:
+            if dc.card_id == card.id and dc.is_commander:
+                commander = card
+                break
+        if commander:
+            break
+
+    # Get card pool
+    pool = card_repo.get_commander_legal_cards()
+
+    # Get prices for deck cards + pool in a single bulk query
+    all_ids = [c.id for c in deck_cards if c.id is not None]
+    all_ids.extend(c.id for c in pool if c.id is not None)
+    bulk_prices = price_repo.get_cheapest_prices(all_ids)
+
+    # Convert card_id -> price to card_name -> price
+    name_prices: dict[str, float] = {}
+    for card in deck_cards + pool:
+        if card.id is not None and card.id in bulk_prices:
+            name_prices[card.name] = bulk_prices[card.id]
+
+    service = UpgradeService()
+    _analysis, recommendations = service.recommend_from_cards(
+        deck_cards=deck_cards,
+        card_pool=pool,
+        prices=name_prices,
+        budget=req.budget,
+        commander=commander,
+        focus=req.focus,
+    )
+
+    rec_responses = [
+        UpgradeRecommendationResponse(
+            card_out=rec.card_out.name,
+            card_in=rec.card_in.name,
+            price_delta=round(rec.price_delta, 2),
+            reason=rec.reason,
+            upgrade_score=round(rec.upgrade_score, 2),
+        )
+        for rec in recommendations
+    ]
+
+    total_cost = round(
+        sum(max(0, r.price_delta) for r in rec_responses), 2
+    )
+
+    return DeckUpgradeResponse(
+        deck_id=deck_id,
+        recommendations=rec_responses,
+        total_cost=total_cost,
     )

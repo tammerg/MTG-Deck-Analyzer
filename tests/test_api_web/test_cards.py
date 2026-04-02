@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, patch
+
 from fastapi.testclient import TestClient
 
 
@@ -167,3 +169,54 @@ class TestCommanderSearch:
         data = resp.json()
         assert any(c["name"] == "Atraxa, Praetors' Voice" for c in data)
         assert all(c["legal_commander"] for c in data)
+
+
+class TestPopularCommanders:
+    def test_returns_commanders_from_edhrec(self, client: TestClient) -> None:
+        mock_pairs = [
+            ("Atraxa, Praetors' Voice", 5000),
+            ("Sol Ring", 3000),  # not a commander — but exists in seeded db
+        ]
+        with patch(
+            "mtg_deck_maker.api.web.routers.cards.fetch_popular_commanders",
+            new_callable=AsyncMock,
+            return_value=mock_pairs,
+        ):
+            resp = client.get("/api/commanders/popular?limit=10")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "commanders" in data
+        assert len(data["commanders"]) == 2
+        assert data["commanders"][0]["card"]["name"] == "Atraxa, Praetors' Voice"
+        assert data["commanders"][0]["num_decks"] == 5000
+        assert data["commanders"][0]["card"]["image_url"] is not None
+
+    def test_skips_unmatched_names(self, client: TestClient) -> None:
+        mock_pairs = [
+            ("Nonexistent Commander", 9000),
+            ("Atraxa, Praetors' Voice", 5000),
+        ]
+        with patch(
+            "mtg_deck_maker.api.web.routers.cards.fetch_popular_commanders",
+            new_callable=AsyncMock,
+            return_value=mock_pairs,
+        ):
+            resp = client.get("/api/commanders/popular")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["commanders"]) == 1
+        assert data["commanders"][0]["card"]["name"] == "Atraxa, Praetors' Voice"
+
+    def test_empty_edhrec_response(self, client: TestClient) -> None:
+        with patch(
+            "mtg_deck_maker.api.web.routers.cards.fetch_popular_commanders",
+            new_callable=AsyncMock,
+            return_value=[],
+        ):
+            resp = client.get("/api/commanders/popular")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["commanders"] == []

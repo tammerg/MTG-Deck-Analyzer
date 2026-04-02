@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
 import CommanderSearch from '../components/search/CommanderSearch';
+import PopularCommanders from '../components/research/PopularCommanders';
 import ResearchResultDisplay from '../components/research/ResearchResultDisplay';
 import { useResearch } from '../hooks/useResearch';
 import type { CardResponse } from '../api/types';
 
 /**
- * Commander research page — uses LLM to analyze a commander's strategy.
+ * Commander research page — data-driven or LLM-powered strategy analysis.
  *
  * Features:
  * - Commander autocomplete search
@@ -20,7 +21,7 @@ export default function ResearchPage() {
 
   const [commander, setCommander] = useState<CardResponse | null>(null);
   const [budget, setBudget] = useState<number | ''>('');
-  const [provider, setProvider] = useState('');
+  const [provider, setProvider] = useState('data');
 
   const { research, isResearching, result, error, reset } = useResearch();
 
@@ -46,7 +47,7 @@ export default function ResearchPage() {
           Research a Commander
         </h1>
         <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
-          Use AI to analyze strategy, key cards, combos, and win conditions for any commander.
+          Analyze strategy, key cards, combos, and win conditions for any commander.
         </p>
       </header>
 
@@ -125,6 +126,7 @@ export default function ResearchPage() {
                 'focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]',
               ].join(' ')}
             >
+              <option value="data">Free (Data-Driven)</option>
               <option value="">Auto</option>
               <option value="anthropic">Anthropic (Claude)</option>
               <option value="openai">OpenAI (GPT)</option>
@@ -156,6 +158,13 @@ export default function ResearchPage() {
           </button>
         </div>
       </section>
+
+      {/* ------------------------------------------------------------------ */}
+      {/* Popular commanders — shown when idle                                 */}
+      {/* ------------------------------------------------------------------ */}
+      {!result && !isResearching && !error && (
+        <PopularCommanders onSelect={handleCommanderSelect} />
+      )}
 
       {/* ------------------------------------------------------------------ */}
       {/* Loading state — shown when no result yet                             */}

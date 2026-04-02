@@ -1,4 +1,4 @@
-"""Shared fixtures for the web API test suite."""
+"""Shared fixtures for web API test suite."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from mtg_deck_maker.api.web.app import create_app
 from mtg_deck_maker.api.web.dependencies import get_db
 from mtg_deck_maker.db.card_repo import CardRepository
+from mtg_deck_maker.db.combo_repo import ComboRepository
 from mtg_deck_maker.db.database import Database
 from mtg_deck_maker.db.price_repo import PriceRepository
 from mtg_deck_maker.db.printing_repo import PrintingRepository
@@ -30,6 +31,8 @@ def seeded_db(mem_db: Database) -> Database:
     card_repo = CardRepository(mem_db)
     printing_repo = PrintingRepository(mem_db)
     price_repo = PriceRepository(mem_db)
+    combo_repo = ComboRepository(mem_db)
+    combo_repo.create_tables()
 
     # Insert commander card
     cmd_card = Card(

@@ -201,7 +201,7 @@ class BuildService:
 
             if not edhrec_repo.has_data(cmd_name) or edhrec_repo.is_stale(cmd_name):
                 logger.debug("Fetching EDHREC data for %s", cmd_name)
-                edhrec_data = run_async(fetch_commander_data(cmd_name))
+                edhrec_data: list = run_async(fetch_commander_data(cmd_name))
                 if edhrec_data:
                     edhrec_repo.upsert_data(edhrec_data)
                     logger.debug("Cached %d EDHREC cards for %s", len(edhrec_data), cmd_name)

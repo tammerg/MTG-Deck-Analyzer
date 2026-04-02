@@ -9,6 +9,8 @@ interface DeckCategoryGroupProps {
   budget?: number;
   /** Whether the group starts expanded. Defaults to true. */
   defaultExpanded?: boolean;
+  /** Callback when a card row is clicked. */
+  onCardClick?: (card: DeckCardResponse) => void;
 }
 
 /**
@@ -27,6 +29,7 @@ export default function DeckCategoryGroup({
   cards,
   budget,
   defaultExpanded = true,
+  onCardClick,
 }: DeckCategoryGroupProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
 
@@ -90,7 +93,7 @@ export default function DeckCategoryGroup({
         <ul className="mt-1 space-y-1 pl-2" role="list">
           {sortedCards.map((card) => (
             <li key={card.card_id}>
-              <CardListItem variant="deck-card" card={card} budget={budget} />
+              <CardListItem variant="deck-card" card={card} budget={budget} onClick={onCardClick} />
             </li>
           ))}
         </ul>

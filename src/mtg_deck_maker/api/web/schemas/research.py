@@ -1,10 +1,12 @@
-"""Pydantic schemas for research-related API endpoints."""
+"""Pydantic schemas for the research API endpoints."""
 
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from mtg_deck_maker.api.web.schemas.deck import ProviderLiteral
+from typing import Literal
+
+ResearchProviderLiteral = Literal["auto", "openai", "anthropic", "data"]
 
 
 class ResearchRequest(BaseModel):
@@ -12,7 +14,7 @@ class ResearchRequest(BaseModel):
 
     commander: str = Field(min_length=1, max_length=200)
     budget: float | None = None
-    provider: ProviderLiteral = "auto"
+    provider: ResearchProviderLiteral = "auto"
 
 
 class ResearchResponse(BaseModel):
@@ -26,3 +28,4 @@ class ResearchResponse(BaseModel):
     win_conditions: list[str]
     cards_to_avoid: list[str]
     parse_success: bool
+    source: Literal["llm", "data"] = "llm"

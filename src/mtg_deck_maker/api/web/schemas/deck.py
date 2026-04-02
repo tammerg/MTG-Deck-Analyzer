@@ -159,3 +159,33 @@ class StrategyGuideResponse(BaseModel):
     hand_simulation: HandSimulationResponse | None = None
     key_synergies: list[KeySynergyResponse]
     llm_narrative: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Upgrade schemas
+# ---------------------------------------------------------------------------
+
+
+class DeckUpgradeRequest(BaseModel):
+    """Request body for deck upgrade recommendations."""
+
+    budget: float = Field(50.0, gt=0)
+    focus: str | None = None
+
+
+class UpgradeRecommendationResponse(BaseModel):
+    """A single recommended card swap."""
+
+    card_out: str
+    card_in: str
+    price_delta: float
+    reason: str
+    upgrade_score: float
+
+
+class DeckUpgradeResponse(BaseModel):
+    """Response with upgrade recommendations for a deck."""
+
+    deck_id: int
+    recommendations: list[UpgradeRecommendationResponse]
+    total_cost: float

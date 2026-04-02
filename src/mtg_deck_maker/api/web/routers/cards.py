@@ -5,7 +5,13 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from mtg_deck_maker.api.web.dependencies import get_db
-from mtg_deck_maker.api.web.schemas.card import CardResponse, CardSearchResponse
+from mtg_deck_maker.api.edhrec import fetch_popular_commanders
+from mtg_deck_maker.api.web.schemas.card import (
+    CardResponse,
+    CardSearchResponse,
+    PopularCommanderResponse,
+    PopularCommandersListResponse,
+)
 from mtg_deck_maker.db.card_repo import CardRepository
 from mtg_deck_maker.db.database import Database
 from mtg_deck_maker.db.price_repo import PriceRepository
@@ -235,3 +241,36 @@ def search_commanders(
 
     results = results[:limit]
     return [_card_to_response(c, printing_repo) for c in results]
+
+
+@router.get(
+    "/commanders/popular",
+    response_model=PopularCommandersListResponse,
+)
+async def get_popular_commanders(
+    limit: int = Query(20, ge=1, le=100, description="Number of commanders"),
+    db: Database = Depends(get_db),
+) -> PopularCommandersListResponse:
+    """Return the most popular commanders from EDHREC.
+
+    Fetches top commanders by deck count and resolves each to a full
+    CardResponse with image URL.
+    """
+    pairs = await fetch_popular_commanders(limit=limit)
+
+    card_repo = CardRepository(db)
+    printing_repo = PrintingRepository(db)
+
+    commanders: list[PopularCommanderResponse] = []
+    for name, num_decks in pairs:
+        card = card_repo.get_card_by_name(name)
+        if card is None:
+            continue
+        commanders.append(
+            PopularCommanderResponse(
+                card=_card_to_response(card, printing_repo),
+                num_decks=num_decks,
+            )
+        )
+
+    return PopularCommandersListResponse(commanders=commanders)

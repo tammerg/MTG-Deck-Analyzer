@@ -6,15 +6,16 @@ interface ManaCurveChartProps {
 
 const CMC_LABELS = ['0', '1', '2', '3', '4', '5', '6', '7+'];
 
+/** Purple gradient from light to dark — visually conveys increasing mana cost. */
 const BAR_COLORS = [
-  'bg-slate-500',
-  'bg-blue-500',
-  'bg-green-500',
-  'bg-yellow-500',
-  'bg-orange-500',
-  'bg-red-500',
+  'bg-violet-300',
+  'bg-violet-400',
+  'bg-violet-500',
   'bg-purple-500',
-  'bg-pink-600',
+  'bg-purple-600',
+  'bg-purple-700',
+  'bg-purple-800',
+  'bg-purple-900',
 ];
 
 /**
@@ -49,7 +50,7 @@ export default function ManaCurveChart({ cards }: ManaCurveChartProps) {
       </h3>
 
       <div
-        className="flex h-32 items-end gap-1.5"
+        className="flex h-32 gap-1.5"
         role="img"
         aria-label={`Mana curve: ${buckets.map((count, i) => `CMC ${CMC_LABELS[i]}: ${count} cards`).join(', ')}`}
       >
@@ -59,7 +60,7 @@ export default function ManaCurveChart({ cards }: ManaCurveChartProps) {
           return (
             <div
               key={index}
-              className="flex flex-1 flex-col items-center gap-1"
+              className="flex flex-1 flex-col items-center justify-end gap-1"
               title={`CMC ${CMC_LABELS[index]}: ${count} card${count !== 1 ? 's' : ''}`}
             >
               {/* Count label above bar */}

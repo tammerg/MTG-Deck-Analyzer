@@ -1,14 +1,26 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { useStrategyGuide } from '../../hooks/useStrategyGuide';
-import type { GamePhaseResponse, HandSimulationResponse, KeySynergyResponse, WinPathResponse } from '../../api/types';
+import { extractScryfallId, getImageUrl } from '../../utils/scryfall';
+import CardLightbox from '../card/CardLightbox';
+import type { DeckCardResponse, GamePhaseResponse, HandSimulationResponse, KeySynergyResponse, WinPathResponse } from '../../api/types';
 
 interface StrategyGuideProps {
   deckId: number;
+  cards?: DeckCardResponse[];
 }
 
-export default function StrategyGuide({ deckId }: StrategyGuideProps) {
+export default function StrategyGuide({ deckId, cards = [] }: StrategyGuideProps) {
   const { generate, data, isPending, error } = useStrategyGuide(deckId);
+  const [lightboxCard, setLightboxCard] = useState<{ name: string; url: string } | null>(null);
+
+  const imageByName = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of cards) {
+      if (c.image_url) map.set(c.card_name, c.image_url);
+    }
+    return map;
+  }, [cards]);
 
   return (
     <section
@@ -82,22 +94,84 @@ export default function StrategyGuide({ deckId }: StrategyGuideProps) {
           </div>
 
           {/* Win Conditions */}
-          {data.win_paths.length > 0 && <WinConditions winPaths={data.win_paths} />}
+          {data.win_paths.length > 0 && (
+            <WinConditions winPaths={data.win_paths} imageByName={imageByName} onCardClick={setLightboxCard} />
+          )}
 
           {/* Game Plan Timeline */}
-          {data.game_phases.length > 0 && <GamePlanTimeline phases={data.game_phases} />}
+          {data.game_phases.length > 0 && (
+            <GamePlanTimeline phases={data.game_phases} imageByName={imageByName} onCardClick={setLightboxCard} />
+          )}
 
           {/* Opening Hand Simulator */}
-          {data.hand_simulation && <OpeningHandStats simulation={data.hand_simulation} />}
+          {data.hand_simulation && (
+            <OpeningHandStats simulation={data.hand_simulation} imageByName={imageByName} onCardClick={setLightboxCard} />
+          )}
 
           {/* Key Synergies */}
-          {data.key_synergies.length > 0 && <KeySynergies synergies={data.key_synergies} />}
+          {data.key_synergies.length > 0 && (
+            <KeySynergies synergies={data.key_synergies} imageByName={imageByName} onCardClick={setLightboxCard} />
+          )}
 
           {/* LLM Narrative */}
           <NarrativeSection narrative={data.llm_narrative} />
         </div>
       )}
+
+      {/* Lightbox */}
+      {lightboxCard && (
+        <CardLightbox
+          imageUrl={lightboxCard.url}
+          cardName={lightboxCard.name}
+          onClose={() => setLightboxCard(null)}
+        />
+      )}
     </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// CardBadge — clickable card name with optional thumbnail
+// ---------------------------------------------------------------------------
+
+interface CardBadgeProps {
+  name: string;
+  imageByName: Map<string, string>;
+  onCardClick: (card: { name: string; url: string }) => void;
+}
+
+function CardBadge({ name, imageByName, onCardClick }: CardBadgeProps) {
+  const imageUrl = imageByName.get(name);
+
+  if (!imageUrl) {
+    return (
+      <span className="rounded bg-[var(--color-surface-raised)] px-2 py-0.5 text-xs text-[var(--color-text-primary)]">
+        {name}
+      </span>
+    );
+  }
+
+  const scryfallId = extractScryfallId(imageUrl);
+  const thumbUrl = scryfallId ? getImageUrl(scryfallId, 'small') : imageUrl;
+
+  return (
+    <button
+      type="button"
+      role="button"
+      tabIndex={0}
+      onClick={() => onCardClick({ name, url: imageUrl })}
+      className="group inline-flex cursor-pointer items-center gap-1.5 rounded bg-[var(--color-surface-raised)] px-1.5 py-0.5 text-xs text-[var(--color-text-primary)] transition-all hover:scale-[1.02] hover:ring-1 hover:ring-[var(--color-accent)]/50 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
+      aria-label={`View ${name}`}
+    >
+      <img
+        src={thumbUrl}
+        alt=""
+        aria-hidden="true"
+        loading="lazy"
+        className="h-[32px] w-[23px] rounded-sm object-cover"
+      />
+      <span>{name}</span>
+    </button>
   );
 }
 
@@ -105,7 +179,12 @@ export default function StrategyGuide({ deckId }: StrategyGuideProps) {
 // Win Conditions
 // ---------------------------------------------------------------------------
 
-function WinConditions({ winPaths }: { winPaths: WinPathResponse[] }) {
+interface SectionCardProps {
+  imageByName: Map<string, string>;
+  onCardClick: (card: { name: string; url: string }) => void;
+}
+
+function WinConditions({ winPaths, imageByName, onCardClick }: { winPaths: WinPathResponse[] } & SectionCardProps) {
   const [expanded, setExpanded] = useState<string | null>(null);
 
   return (
@@ -140,12 +219,7 @@ function WinConditions({ winPaths }: { winPaths: WinPathResponse[] }) {
                   <p className="text-[var(--color-text-secondary)]">{wp.description}</p>
                   <div className="mt-2 flex flex-wrap gap-1">
                     {wp.cards.map((card) => (
-                      <span
-                        key={card}
-                        className="rounded bg-[var(--color-surface-raised)] px-2 py-0.5 text-xs text-[var(--color-text-primary)]"
-                      >
-                        {card}
-                      </span>
+                      <CardBadge key={card} name={card} imageByName={imageByName} onCardClick={onCardClick} />
                     ))}
                   </div>
                 </div>
@@ -162,7 +236,7 @@ function WinConditions({ winPaths }: { winPaths: WinPathResponse[] }) {
 // Game Plan Timeline
 // ---------------------------------------------------------------------------
 
-function GamePlanTimeline({ phases }: { phases: GamePhaseResponse[] }) {
+function GamePlanTimeline({ phases, imageByName, onCardClick }: { phases: GamePhaseResponse[] } & SectionCardProps) {
   return (
     <div>
       <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-text-secondary)]">
@@ -189,12 +263,7 @@ function GamePlanTimeline({ phases }: { phases: GamePhaseResponse[] }) {
             {phase.key_cards.length > 0 && (
               <div className="flex flex-wrap gap-1">
                 {phase.key_cards.slice(0, 5).map((card) => (
-                  <span
-                    key={card}
-                    className="rounded bg-[var(--color-surface-raised)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-secondary)]"
-                  >
-                    {card}
-                  </span>
+                  <CardBadge key={card} name={card} imageByName={imageByName} onCardClick={onCardClick} />
                 ))}
               </div>
             )}
@@ -209,7 +278,7 @@ function GamePlanTimeline({ phases }: { phases: GamePhaseResponse[] }) {
 // Opening Hand Stats
 // ---------------------------------------------------------------------------
 
-function OpeningHandStats({ simulation }: { simulation: HandSimulationResponse }) {
+function OpeningHandStats({ simulation, imageByName, onCardClick }: { simulation: HandSimulationResponse } & SectionCardProps) {
   const keepPct = Math.round(simulation.keep_rate * 100);
   const keepColor =
     keepPct >= 70
@@ -268,8 +337,10 @@ function OpeningHandStats({ simulation }: { simulation: HandSimulationResponse }
                 >
                   {hand.keep_recommendation ? 'KEEP' : 'MULL'}
                 </span>
-                <span className="flex-1 truncate text-[var(--color-text-primary)]">
-                  {hand.cards.join(', ')}
+                <span className="flex flex-1 flex-wrap gap-1">
+                  {hand.cards.map((card, j) => (
+                    <CardBadge key={`${card}-${j}`} name={card} imageByName={imageByName} onCardClick={onCardClick} />
+                  ))}
                 </span>
                 <span className="shrink-0 text-[var(--color-text-secondary)]">
                   {hand.land_count}L / {hand.ramp_count}R
@@ -287,7 +358,7 @@ function OpeningHandStats({ simulation }: { simulation: HandSimulationResponse }
 // Key Synergies
 // ---------------------------------------------------------------------------
 
-function KeySynergies({ synergies }: { synergies: KeySynergyResponse[] }) {
+function KeySynergies({ synergies, imageByName, onCardClick }: { synergies: KeySynergyResponse[] } & SectionCardProps) {
   return (
     <div>
       <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-text-secondary)]">
@@ -300,13 +371,9 @@ function KeySynergies({ synergies }: { synergies: KeySynergyResponse[] }) {
             className="flex items-start gap-2 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm"
           >
             <div className="flex shrink-0 items-center gap-1">
-              <span className="rounded bg-[var(--color-surface-raised)] px-2 py-0.5 text-xs font-medium text-[var(--color-text-primary)]">
-                {syn.card_a}
-              </span>
+              <CardBadge name={syn.card_a} imageByName={imageByName} onCardClick={onCardClick} />
               <span className="text-xs text-[var(--color-text-secondary)]">+</span>
-              <span className="rounded bg-[var(--color-surface-raised)] px-2 py-0.5 text-xs font-medium text-[var(--color-text-primary)]">
-                {syn.card_b}
-              </span>
+              <CardBadge name={syn.card_b} imageByName={imageByName} onCardClick={onCardClick} />
             </div>
             <span className="text-xs text-[var(--color-text-secondary)]">{syn.reason}</span>
           </div>

@@ -1,4 +1,4 @@
-// TypeScript types matching backend Pydantic schemas
+// TypeScript types matching the backend Pydantic schemas
 
 export interface CardResponse {
   id: number;
@@ -73,6 +73,15 @@ export interface DeckBuildRequest {
   provider?: string;
 }
 
+export interface PopularCommanderResponse {
+  card: CardResponse;
+  num_decks: number;
+}
+
+export interface PopularCommandersListResponse {
+  commanders: PopularCommanderResponse[];
+}
+
 export type DeckExportFormat = 'csv' | 'moxfield' | 'archidekt';
 
 export interface DeckExportRequest {
@@ -100,6 +109,7 @@ export interface ResearchResponse {
   win_conditions: string[];
   cards_to_avoid: string[];
   parse_success: boolean;
+  source: 'llm' | 'data';
 }
 
 export interface HealthResponse {
@@ -249,4 +259,25 @@ export interface StrategyGuideResponse {
   hand_simulation: HandSimulationResponse | null;
   key_synergies: KeySynergyResponse[];
   llm_narrative: string | null;
+}
+
+// Upgrade types
+
+export interface DeckUpgradeRequest {
+  budget: number;
+  focus?: string;
+}
+
+export interface UpgradeRecommendationResponse {
+  card_out: string;
+  card_in: string;
+  price_delta: number;
+  reason: string;
+  upgrade_score: number;
+}
+
+export interface DeckUpgradeResponse {
+  deck_id: number;
+  recommendations: UpgradeRecommendationResponse[];
+  total_cost: number;
 }

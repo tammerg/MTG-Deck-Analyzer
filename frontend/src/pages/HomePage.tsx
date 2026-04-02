@@ -40,7 +40,7 @@ export default function HomePage() {
       <section aria-labelledby="search-heading">
         <h2
           id="search-heading"
-          className="mb-3 text-lg font-semibold text-[var(--color-text-primary)]"
+          className="mb-3 text-center text-lg font-semibold text-[var(--color-text-primary)]"
         >
           Find a Commander
         </h2>
@@ -62,7 +62,7 @@ export default function HomePage() {
 
       {/* Recent decks */}
       <section aria-labelledby="recent-heading">
-        <div className="mb-3 flex items-center justify-between">
+        <div className="mb-3 flex flex-col items-center gap-2">
           <div className="flex items-center gap-2">
             <h2
               id="recent-heading"
@@ -160,12 +160,12 @@ interface DeckListRowProps {
 
 function DeckListRow({ deck, onDelete, isDeleting }: DeckListRowProps) {
   return (
-    <li className="group relative flex items-center gap-2">
+    <li className="group relative">
       {/* Main clickable row */}
       <Link
         to={`/deck/${deck.id}`}
         className={[
-          'flex flex-1 items-center justify-between rounded-lg px-4 py-3',
+          'flex items-center justify-between rounded-lg py-3 pl-4 pr-14',
           'border border-[var(--color-border)] bg-[var(--color-surface-alt)]',
           'hover:bg-[var(--color-surface-raised)] transition-colors',
           'focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]',
@@ -196,14 +196,14 @@ function DeckListRow({ deck, onDelete, isDeleting }: DeckListRowProps) {
         </div>
       </Link>
 
-      {/* Delete button — appears on hover/focus */}
+      {/* Delete button — appears on hover/focus, overlaid on right edge */}
       <button
         type="button"
         onClick={onDelete}
         disabled={isDeleting}
         aria-label={`Delete deck ${deck.name}`}
         className={[
-          'shrink-0 rounded-lg border border-transparent p-2 text-[var(--color-text-secondary)]',
+          'absolute right-3 top-1/2 -translate-y-1/2 rounded-lg border border-transparent p-2 text-[var(--color-text-secondary)]',
           'opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity',
           'hover:border-[var(--color-budget-over)] hover:text-[var(--color-budget-over)]',
           'focus:outline-none focus:ring-2 focus:ring-[var(--color-budget-over)]',

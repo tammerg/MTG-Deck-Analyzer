@@ -40,6 +40,19 @@ class CardSearchResponse(BaseModel):
     total: int
 
 
+class PopularCommanderResponse(BaseModel):
+    """Response schema for a single popular commander."""
+
+    card: CardResponse
+    num_decks: int
+
+
+class PopularCommandersListResponse(BaseModel):
+    """Response schema for the popular commanders list."""
+
+    commanders: list[PopularCommanderResponse]
+
+
 class CardSearchParams(BaseModel):
     """Query parameters for card search."""
 
